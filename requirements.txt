@@ -1,3 +1,4 @@
 playwright>=1.50.0
 playwright-stealth>=2.0.0
 awpy>=2.0.0
+rarfile>=4.0

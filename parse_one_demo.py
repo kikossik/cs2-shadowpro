@@ -13,7 +13,7 @@ Usage:
 import sys
 from pathlib import Path
 
-import pandas as pd
+import polars as pl
 from awpy import Demo
 
 OUT_DIR = Path("parsed_sample")
@@ -28,7 +28,7 @@ def main(path: Path) -> None:
     print("\n=== header ===")
     print(header)
 
-    df_attrs: dict[str, pd.DataFrame] = {}
+    df_attrs: dict[str, pl.DataFrame] = {}
     for name in dir(dem):
         if name.startswith("_"):
             continue
@@ -36,7 +36,7 @@ def main(path: Path) -> None:
             val = getattr(dem, name)
         except Exception:
             continue
-        if isinstance(val, pd.DataFrame):
+        if isinstance(val, pl.DataFrame):
             df_attrs[name] = val
 
     print(f"\nDataFrame attributes: {sorted(df_attrs)}")
@@ -44,11 +44,10 @@ def main(path: Path) -> None:
     OUT_DIR.mkdir(exist_ok=True)
     for name, df in df_attrs.items():
         print(f"\n=== {name}  (rows={len(df)}, cols={len(df.columns)}) ===")
-        print("columns:", list(df.columns))
+        print("columns:", df.columns)
         if len(df):
-            with pd.option_context("display.max_columns", None, "display.width", 200):
-                print(df.head(3))
-        df.to_parquet(OUT_DIR / f"{name}.parquet")
+            print(df.head(3))
+        df.write_parquet(OUT_DIR / f"{name}.parquet")
 
     print(f"\nSaved full DataFrames → {OUT_DIR}/")
 
