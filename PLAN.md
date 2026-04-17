@@ -142,14 +142,20 @@ Present top 3 per user situation with a **why-it-matched breakdown** ("Same map 
 - Eyeball ~20 queries. Tune the scoring weights + thresholds.
 - **This is the point where we know whether the product actually works.** Do not skip.
 
-**M5 — FACEIT ingestion** *(new code, external integration)*
+**M4.5 — Situation Viewer (design implementation)** *(inserted after M4)*
+- Port the Claude Design prototype to a real Vite + React + TS app under `web/`.
+- Static mock data initially (`web/src/mockData.ts`); backend wiring is M6's job.
+- Component intent, themes, layout decisions, and data contract live in `DESIGN.md`.
+
+**M5 — FACEIT ingestion** *(new code, external integration)* - 
 - FACEIT OAuth2 flow (dev API).
 - Pull last 10 matches per user; queue demo downloads.
 - Run the user demos through `decompress → parse → extract` into the same SQLite under `source='user'`.
 
-**M6 — web app + viewer** *(UI)*
-- FastAPI backend exposing `GET /report/{match_id}` that returns each situation + its top matches.
-- React frontend: login w/ FACEIT, match list, report page with the side-by-side radar viewer.
+**M6 — backend + viewer wiring** *(UI integration)*
+- FastAPI backend exposing `GET /report/{match_id}` and `GET /situation/{id}` that returns the JSON shape the viewer consumes (see `DESIGN.md` § Data contract).
+- Replace `web/src/mockData.ts` with API fetch.
+- React frontend additions: login w/ FACEIT, match list, report list page (the hero viewer is already done in M4.5).
 
 **M7 — scale to 200 + launch polish**
 - Re-run scrape to 200 matches; batch-download + re-index.
