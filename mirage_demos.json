@@ -1,0 +1,408 @@
+{
+  "scraped_at": "2026-04-17T03:55:42.895173+00:00",
+  "target_map": "Mirage",
+  "total_matches": 50,
+  "demos_found": 50,
+  "matches": [
+    {
+      "rank": 1,
+      "match_id": "2393238",
+      "match_url": "https://www.hltv.org/matches/2393238/furia-vs-mouz-iem-rio-2026",
+      "slug": "furia-vs-mouz-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107159",
+      "error": null
+    },
+    {
+      "rank": 2,
+      "match_id": "2393239",
+      "match_url": "https://www.hltv.org/matches/2393239/natus-vincere-vs-aurora-iem-rio-2026",
+      "slug": "natus-vincere-vs-aurora-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107160",
+      "error": null
+    },
+    {
+      "rank": 3,
+      "match_id": "2393352",
+      "match_url": "https://www.hltv.org/matches/2393352/procyon-vs-vasco-cct-2026-challengers-south-america-series-1",
+      "slug": "procyon-vs-vasco-cct-2026-challengers-south-america-series-1",
+      "demo_url": "https://www.hltv.org/download/demo/107170",
+      "error": null
+    },
+    {
+      "rank": 4,
+      "match_id": "2393345",
+      "match_url": "https://www.hltv.org/matches/2393345/mouse-vs-zomblers-crossfire-season-4",
+      "slug": "mouse-vs-zomblers-crossfire-season-4",
+      "demo_url": "https://www.hltv.org/download/demo/107169",
+      "error": null
+    },
+    {
+      "rank": 5,
+      "match_id": "2393166",
+      "match_url": "https://www.hltv.org/matches/2393166/lavked-vs-bebop-nodwin-clutch-series-7",
+      "slug": "lavked-vs-bebop-nodwin-clutch-series-7",
+      "demo_url": "https://www.hltv.org/download/demo/107162",
+      "error": null
+    },
+    {
+      "rank": 6,
+      "match_id": "2393236",
+      "match_url": "https://www.hltv.org/matches/2393236/vitality-vs-falcons-iem-rio-2026",
+      "slug": "vitality-vs-falcons-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107158",
+      "error": null
+    },
+    {
+      "rank": 7,
+      "match_id": "2393237",
+      "match_url": "https://www.hltv.org/matches/2393237/g2-vs-spirit-iem-rio-2026",
+      "slug": "g2-vs-spirit-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107157",
+      "error": null
+    },
+    {
+      "rank": 8,
+      "match_id": "2393234",
+      "match_url": "https://www.hltv.org/matches/2393234/b8-vs-aurora-iem-rio-2026",
+      "slug": "b8-vs-aurora-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107153",
+      "error": null
+    },
+    {
+      "rank": 9,
+      "match_id": "2393232",
+      "match_url": "https://www.hltv.org/matches/2393232/red-canids-vs-spirit-iem-rio-2026",
+      "slug": "red-canids-vs-spirit-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107149",
+      "error": null
+    },
+    {
+      "rank": 10,
+      "match_id": "2393331",
+      "match_url": "https://www.hltv.org/matches/2393331/brute-vs-fire-flux-united21-league-season-47",
+      "slug": "brute-vs-fire-flux-united21-league-season-47",
+      "demo_url": "https://www.hltv.org/download/demo/107145",
+      "error": null
+    },
+    {
+      "rank": 11,
+      "match_id": "2392155",
+      "match_url": "https://www.hltv.org/matches/2392155/lavked-vs-phantom-european-pro-league-series-6",
+      "slug": "lavked-vs-phantom-european-pro-league-series-6",
+      "demo_url": "https://www.hltv.org/download/demo/107144",
+      "error": null
+    },
+    {
+      "rank": 12,
+      "match_id": "2393340",
+      "match_url": "https://www.hltv.org/matches/2393340/insane-players-vs-aether-dust2us-eagle-masters-series-7",
+      "slug": "insane-players-vs-aether-dust2us-eagle-masters-series-7",
+      "demo_url": "https://www.hltv.org/download/demo/107142",
+      "error": null
+    },
+    {
+      "rank": 13,
+      "match_id": "2393230",
+      "match_url": "https://www.hltv.org/matches/2393230/mouz-vs-aurora-iem-rio-2026",
+      "slug": "mouz-vs-aurora-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107140",
+      "error": null
+    },
+    {
+      "rank": 14,
+      "match_id": "2393228",
+      "match_url": "https://www.hltv.org/matches/2393228/natus-vincere-vs-furia-iem-rio-2026",
+      "slug": "natus-vincere-vs-furia-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107138",
+      "error": null
+    },
+    {
+      "rank": 15,
+      "match_id": "2393229",
+      "match_url": "https://www.hltv.org/matches/2393229/b8-vs-passion-ua-iem-rio-2026",
+      "slug": "b8-vs-passion-ua-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107137",
+      "error": null
+    },
+    {
+      "rank": 16,
+      "match_id": "2393161",
+      "match_url": "https://www.hltv.org/matches/2393161/1win-vs-bebop-nodwin-clutch-series-7",
+      "slug": "1win-vs-bebop-nodwin-clutch-series-7",
+      "demo_url": "https://www.hltv.org/download/demo/107135",
+      "error": null
+    },
+    {
+      "rank": 17,
+      "match_id": "2393292",
+      "match_url": "https://www.hltv.org/matches/2393292/young-ninjas-vs-tricked-tipsport-conquest-of-prague-2026",
+      "slug": "young-ninjas-vs-tricked-tipsport-conquest-of-prague-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107134",
+      "error": null
+    },
+    {
+      "rank": 18,
+      "match_id": "2393226",
+      "match_url": "https://www.hltv.org/matches/2393226/spirit-vs-falcons-iem-rio-2026",
+      "slug": "spirit-vs-falcons-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107133",
+      "error": null
+    },
+    {
+      "rank": 19,
+      "match_id": "2393291",
+      "match_url": "https://www.hltv.org/matches/2393291/fnatic-vs-eyeballers-tipsport-conquest-of-prague-2026",
+      "slug": "fnatic-vs-eyeballers-tipsport-conquest-of-prague-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107131",
+      "error": null
+    },
+    {
+      "rank": 20,
+      "match_id": "2393160",
+      "match_url": "https://www.hltv.org/matches/2393160/ex-ruby-vs-phantom-nodwin-clutch-series-7",
+      "slug": "ex-ruby-vs-phantom-nodwin-clutch-series-7",
+      "demo_url": "https://www.hltv.org/download/demo/107130",
+      "error": null
+    },
+    {
+      "rank": 21,
+      "match_id": "2393224",
+      "match_url": "https://www.hltv.org/matches/2393224/vitality-vs-g2-iem-rio-2026",
+      "slug": "vitality-vs-g2-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107129",
+      "error": null
+    },
+    {
+      "rank": 22,
+      "match_id": "2393225",
+      "match_url": "https://www.hltv.org/matches/2393225/red-canids-vs-gentle-mates-iem-rio-2026",
+      "slug": "red-canids-vs-gentle-mates-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107127",
+      "error": null
+    },
+    {
+      "rank": 23,
+      "match_id": "2393330",
+      "match_url": "https://www.hltv.org/matches/2393330/misa-vs-fire-flux-united21-league-season-47",
+      "slug": "misa-vs-fire-flux-united21-league-season-47",
+      "demo_url": "https://www.hltv.org/download/demo/107126",
+      "error": null
+    },
+    {
+      "rank": 24,
+      "match_id": "2392153",
+      "match_url": "https://www.hltv.org/matches/2392153/arcred-vs-lavked-european-pro-league-series-6",
+      "slug": "arcred-vs-lavked-european-pro-league-series-6",
+      "demo_url": "https://www.hltv.org/download/demo/107121",
+      "error": null
+    },
+    {
+      "rank": 25,
+      "match_id": "2393087",
+      "match_url": "https://www.hltv.org/matches/2393087/aurora-vs-hotu-iem-rio-2026",
+      "slug": "aurora-vs-hotu-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107117",
+      "error": null
+    },
+    {
+      "rank": 26,
+      "match_id": "2393085",
+      "match_url": "https://www.hltv.org/matches/2393085/furia-vs-passion-ua-iem-rio-2026",
+      "slug": "furia-vs-passion-ua-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107116",
+      "error": null
+    },
+    {
+      "rank": 27,
+      "match_id": "2393088",
+      "match_url": "https://www.hltv.org/matches/2393088/legacy-vs-mouz-iem-rio-2026",
+      "slug": "legacy-vs-mouz-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107115",
+      "error": null
+    },
+    {
+      "rank": 28,
+      "match_id": "2393289",
+      "match_url": "https://www.hltv.org/matches/2393289/sinners-vs-johnny-speeds-tipsport-conquest-of-prague-2026",
+      "slug": "sinners-vs-johnny-speeds-tipsport-conquest-of-prague-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107113",
+      "error": null
+    },
+    {
+      "rank": 29,
+      "match_id": "2393082",
+      "match_url": "https://www.hltv.org/matches/2393082/gentle-mates-vs-g2-iem-rio-2026",
+      "slug": "gentle-mates-vs-g2-iem-rio-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107108",
+      "error": null
+    },
+    {
+      "rank": 30,
+      "match_id": "2392152",
+      "match_url": "https://www.hltv.org/matches/2392152/ex-ruby-vs-metizport-european-pro-league-series-6",
+      "slug": "ex-ruby-vs-metizport-european-pro-league-series-6",
+      "demo_url": "https://www.hltv.org/download/demo/107104",
+      "error": null
+    },
+    {
+      "rank": 31,
+      "match_id": "2393130",
+      "match_url": "https://www.hltv.org/matches/2393130/voca-vs-akimbo-cct-season-3-north-america-series-4",
+      "slug": "voca-vs-akimbo-cct-season-3-north-america-series-4",
+      "demo_url": "https://www.hltv.org/download/demo/107100",
+      "error": null
+    },
+    {
+      "rank": 32,
+      "match_id": "2393129",
+      "match_url": "https://www.hltv.org/matches/2393129/zomblers-vs-regain-cct-season-3-north-america-series-4",
+      "slug": "zomblers-vs-regain-cct-season-3-north-america-series-4",
+      "demo_url": "https://www.hltv.org/download/demo/107099",
+      "error": null
+    },
+    {
+      "rank": 33,
+      "match_id": "2393157",
+      "match_url": "https://www.hltv.org/matches/2393157/lavked-vs-rune-eaters-nodwin-clutch-series-7-closed-qualifier",
+      "slug": "lavked-vs-rune-eaters-nodwin-clutch-series-7-closed-qualifier",
+      "demo_url": "https://www.hltv.org/download/demo/107098",
+      "error": null
+    },
+    {
+      "rank": 34,
+      "match_id": "2393283",
+      "match_url": "https://www.hltv.org/matches/2393283/eyeballers-vs-unity-tipsport-conquest-of-prague-2026",
+      "slug": "eyeballers-vs-unity-tipsport-conquest-of-prague-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107096",
+      "error": null
+    },
+    {
+      "rank": 35,
+      "match_id": "2393281",
+      "match_url": "https://www.hltv.org/matches/2393281/aab-vs-entropy-parken-challenger-championship-season-4",
+      "slug": "aab-vs-entropy-parken-challenger-championship-season-4",
+      "demo_url": "https://www.hltv.org/download/demo/107095",
+      "error": null
+    },
+    {
+      "rank": 36,
+      "match_id": "2393223",
+      "match_url": "https://www.hltv.org/matches/2393223/ence-vs-csdiilit-elisa-open-finland-season-12",
+      "slug": "ence-vs-csdiilit-elisa-open-finland-season-12",
+      "demo_url": "https://www.hltv.org/download/demo/107094",
+      "error": null
+    },
+    {
+      "rank": 37,
+      "match_id": "2393222",
+      "match_url": "https://www.hltv.org/matches/2393222/csdiilit-vs-kuusamo-elisa-open-finland-season-12",
+      "slug": "csdiilit-vs-kuusamo-elisa-open-finland-season-12",
+      "demo_url": "https://www.hltv.org/download/demo/107088",
+      "error": null
+    },
+    {
+      "rank": 38,
+      "match_id": "2392150",
+      "match_url": "https://www.hltv.org/matches/2392150/lavked-vs-bebop-european-pro-league-series-6",
+      "slug": "lavked-vs-bebop-european-pro-league-series-6",
+      "demo_url": "https://www.hltv.org/download/demo/107085",
+      "error": null
+    },
+    {
+      "rank": 39,
+      "match_id": "2393154",
+      "match_url": "https://www.hltv.org/matches/2393154/mana-vs-persona-grata-nodwin-clutch-series-7-closed-qualifier",
+      "slug": "mana-vs-persona-grata-nodwin-clutch-series-7-closed-qualifier",
+      "demo_url": "https://www.hltv.org/download/demo/107081",
+      "error": null
+    },
+    {
+      "rank": 40,
+      "match_id": "2393259",
+      "match_url": "https://www.hltv.org/matches/2393259/rooster-vs-ding-cuts-dfrag-open-series-4",
+      "slug": "rooster-vs-ding-cuts-dfrag-open-series-4",
+      "demo_url": "https://www.hltv.org/download/demo/107078",
+      "error": null
+    },
+    {
+      "rank": 41,
+      "match_id": "2393258",
+      "match_url": "https://www.hltv.org/matches/2393258/time-waves-vs-ding-cuts-dfrag-open-series-4",
+      "slug": "time-waves-vs-ding-cuts-dfrag-open-series-4",
+      "demo_url": "https://www.hltv.org/download/demo/107075",
+      "error": null
+    },
+    {
+      "rank": 42,
+      "match_id": "2393337",
+      "match_url": "https://www.hltv.org/matches/2393337/zomblers-vs-incontrol-dust2us-eagle-masters-series-7",
+      "slug": "zomblers-vs-incontrol-dust2us-eagle-masters-series-7",
+      "demo_url": "https://www.hltv.org/download/demo/107076",
+      "error": null
+    },
+    {
+      "rank": 43,
+      "match_id": "2393276",
+      "match_url": "https://www.hltv.org/matches/2393276/laguna-vs-entropy-parken-challenger-championship-season-4",
+      "slug": "laguna-vs-entropy-parken-challenger-championship-season-4",
+      "demo_url": "https://www.hltv.org/download/demo/107072",
+      "error": null
+    },
+    {
+      "rank": 44,
+      "match_id": "2393221",
+      "match_url": "https://www.hltv.org/matches/2393221/ence-vs-csdiilit-elisa-open-finland-season-12",
+      "slug": "ence-vs-csdiilit-elisa-open-finland-season-12",
+      "demo_url": "https://www.hltv.org/download/demo/107069",
+      "error": null
+    },
+    {
+      "rank": 45,
+      "match_id": "2393046",
+      "match_url": "https://www.hltv.org/matches/2393046/astralis-vs-fut-pgl-bucharest-2026",
+      "slug": "astralis-vs-fut-pgl-bucharest-2026",
+      "demo_url": "https://www.hltv.org/download/demo/107070",
+      "error": null
+    },
+    {
+      "rank": 46,
+      "match_id": "2392147",
+      "match_url": "https://www.hltv.org/matches/2392147/ex-ruby-vs-state-european-pro-league-series-6",
+      "slug": "ex-ruby-vs-state-european-pro-league-series-6",
+      "demo_url": "https://www.hltv.org/download/demo/107059",
+      "error": null
+    },
+    {
+      "rank": 47,
+      "match_id": "2393269",
+      "match_url": "https://www.hltv.org/matches/2393269/laguna-vs-aab-parken-challenger-championship-season-4",
+      "slug": "laguna-vs-aab-parken-challenger-championship-season-4",
+      "demo_url": "https://www.hltv.org/download/demo/107055",
+      "error": null
+    },
+    {
+      "rank": 48,
+      "match_id": "2393270",
+      "match_url": "https://www.hltv.org/matches/2393270/entropy-vs-lgod-efterskole-parken-challenger-championship-season-4",
+      "slug": "entropy-vs-lgod-efterskole-parken-challenger-championship-season-4",
+      "demo_url": "https://www.hltv.org/download/demo/107053",
+      "error": null
+    },
+    {
+      "rank": 49,
+      "match_id": "2393254",
+      "match_url": "https://www.hltv.org/matches/2393254/arcade-vs-abyssal-dfrag-open-series-4",
+      "slug": "arcade-vs-abyssal-dfrag-open-series-4",
+      "demo_url": "https://www.hltv.org/download/demo/107052",
+      "error": null
+    },
+    {
+      "rank": 50,
+      "match_id": "2393253",
+      "match_url": "https://www.hltv.org/matches/2393253/abyssal-vs-dxa-dfrag-open-series-4",
+      "slug": "abyssal-vs-dxa-dfrag-open-series-4",
+      "demo_url": "https://www.hltv.org/download/demo/107050",
+      "error": null
+    }
+  ]
+}
