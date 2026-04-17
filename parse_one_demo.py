@@ -18,11 +18,22 @@ from awpy import Demo
 
 OUT_DIR = Path("parsed_sample")
 
+# Extra per-tick player fields beyond awpy's default (X/Y/Z/health/side/place/name/steamid).
+# Needed to classify economy tier and equipment for situation matching.
+PLAYER_PROPS = [
+    "balance",
+    "active_weapon",
+    "armor_value",
+    "has_defuser",
+    "flash_duration",
+    "inventory",
+]
+
 
 def main(path: Path) -> None:
     print(f"Parsing: {path}")
     dem = Demo(path=str(path))
-    dem.parse()
+    dem.parse(player_props=PLAYER_PROPS)
 
     header = getattr(dem, "header", None)
     print("\n=== header ===")
