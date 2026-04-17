@@ -2,6 +2,7 @@ import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Viewer } from "./Viewer";
 import { LoginPage } from "./LoginPage";
+import { MatchesPage } from "./matches/MatchesPage";
 import "./styles.css";
 
 function parseSteamId(claimedId: string): string | null {
@@ -26,16 +27,27 @@ function getInitialSteamId(): string | null {
 
 function App() {
   const [steamId, setSteamId] = useState<string | null>(getInitialSteamId);
+  const [openMatchId, setOpenMatchId] = useState<string | null>(null);
 
   const signOut = () => {
     sessionStorage.removeItem("steam_id");
+    setOpenMatchId(null);
     setSteamId(null);
   };
 
   if (!steamId) {
     return <LoginPage onSignedIn={setSteamId} />;
   }
-  return <Viewer steamId={steamId} onSignOut={signOut} />;
+  if (openMatchId) {
+    return <Viewer steamId={steamId} onSignOut={signOut} onBack={() => setOpenMatchId(null)} />;
+  }
+  return (
+    <MatchesPage
+      steamId={steamId}
+      onOpenMatch={setOpenMatchId}
+      onSignOut={signOut}
+    />
+  );
 }
 
 createRoot(document.getElementById("root")!).render(

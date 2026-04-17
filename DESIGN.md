@@ -16,13 +16,24 @@ web/                         Vite + React + TypeScript app
   public/
     mirage-placeholder.svg   ← swap for licensed Mirage radar PNG before launch
   src/
-    main.tsx
-    Viewer.tsx               main layout, themes, scrubber, why-matched panel
+    main.tsx                 routing: LoginPage → MatchesPage → Viewer
+    LoginPage.tsx            Steam OpenID login
+    Viewer.tsx               situation viewer: layout, themes, scrubber, why-matched panel
     Radar.tsx                single radar pane on a <canvas>
     themes.ts                three theme variants
-    mockData.ts              static SITUATION_DATA (replace with API fetch)
+    mockData.ts              static SITUATION_DATA (replace with API fetch at M6)
     types.ts                 shape of a situation pair
     styles.css
+    matches/                 post-login matches landing page
+      MatchesPage.tsx        container: tweak/filter state, import banner, layout switcher
+      Shell.tsx              TopBar, ImportBanner, FilterBar, RoundStrip, MapThumb
+      LedgerLayout.tsx       dense HLTV-style tabular list (default)
+      CardsLayout.tsx        2-col match cards with stats
+      TimelineLayout.tsx     chronological feed grouped by date
+      TweaksPanel.tsx        layout / import / density / round-strip toggles
+      mockMatches.ts         20 mock Steam-ranked matches (replace with API fetch at M6)
+      types.ts               Match, MatchRound, MatchesTweakState types
+      matches.css            scoped under .matches-root (no collision with Viewer styles)
 ```
 
 Run: `cd web && npm install && npm run dev`.
@@ -142,13 +153,28 @@ the trail and event lists are bundled.
 
 ## What is *not* implemented yet
 
-- Real backend (`server/` is a future milestone)
-- Real Mirage radar PNG (using a placeholder SVG with callout names; swap when
-  Valve asset licensing is reviewed)
-- Login / FACEIT match list / report list pages — only the hero is built
-- Persisting tweak preferences (currently component state; localStorage is the
-  obvious next step)
-- Mobile / narrow viewport layouts (the design assumes ≥1280px)
+- Real backend (`server/` is M6)
+- Real Mirage radar PNG (placeholder SVG; swap when Valve asset licensing is reviewed)
+- Steam match history → demo URLs (M5; Steam API access needs verification)
+- Server-side Steam OpenID `check_authentication` verification (noted in `main.tsx`; required before launch)
+- Match list and situation list populated from API (Matches page uses mock data until M6)
+- Mobile / narrow viewport layouts (assumes ≥1280px)
+
+## Matches landing page
+
+After login the user lands on `MatchesPage` (`web/src/matches/`), which lists their Steam-ranked
+matches and lets them click through to the Viewer for any match.
+
+**3 layouts** switchable via the Tweaks panel:
+- **Ledger** (default) — dense HLTV-stats table: map thumb, score, K/D/A, ADR, HS%, 24-round strip, situation count + top pro match.
+- **Cards** — 2-col grid with bigger map art, full stats row, "REVIEW →" CTA.
+- **Timeline** — grouped by day (TODAY / YESTERDAY / weekday), each match a horizontal strip.
+
+**Shell:** sticky topbar (brand, breadcrumbs, Steam user chip, sign-out), auto-import progress banner (spinner + progress bar, animates when import state = loading), Map dropdown + Result segmented filter, ASCII empty state when filter yields nothing, loading skeleton.
+
+**CSS** is scoped under `.matches-root` so the Viewer's `styles.css` classes don't interfere.
+
+**Data contract for M6** — backend needs `GET /matches/{steam_id}` returning an array with the same shape as `Match` in `web/src/matches/types.ts`. Replace `MOCK_MATCHES` import in `mockMatches.ts` with the API fetch.
 
 ## Out of scope for this design
 

@@ -294,8 +294,14 @@ function WhyMatched({ theme, match }: { theme: Theme; match: Situation["match"] 
   );
 }
 
-type TopBarProps = { theme: Theme; data: Situation; steamId: string; onSignOut: () => void };
-function TopBar({ theme, data, steamId, onSignOut }: TopBarProps) {
+type TopBarProps = {
+  theme: Theme;
+  data: Situation;
+  steamId: string;
+  onSignOut: () => void;
+  onBack?: () => void;
+};
+function TopBar({ theme, data, steamId, onSignOut, onBack }: TopBarProps) {
   const shortId = steamId.slice(-8);
   return (
     <header className="topbar" style={{ borderColor: theme.border, background: theme.panel }}>
@@ -308,7 +314,20 @@ function TopBar({ theme, data, steamId, onSignOut }: TopBarProps) {
         </div>
       </div>
       <nav className="tb-crumbs" style={{ fontFamily: theme.fontMono, color: theme.dim }}>
-        <span>matches</span>
+        {onBack ? (
+          <button
+            onClick={onBack}
+            style={{
+              color: theme.ink, fontFamily: theme.fontMono,
+              border: 0, background: "transparent", padding: 0, cursor: "pointer",
+              letterSpacing: "inherit", fontSize: "inherit",
+            }}
+          >
+            ← matches
+          </button>
+        ) : (
+          <span>matches</span>
+        )}
         <span style={{ color: theme.dimmer }}>/</span>
         <span>ESEA · mir_2026_04_12_2203</span>
         <span style={{ color: theme.dimmer }}>/</span>
@@ -469,8 +488,8 @@ function PaneOverlay({ theme, data }: { theme: Theme; side: "user" | "pro"; data
   );
 }
 
-type ViewerProps = { steamId: string; onSignOut: () => void };
-export function Viewer({ steamId, onSignOut }: ViewerProps) {
+type ViewerProps = { steamId: string; onSignOut: () => void; onBack?: () => void };
+export function Viewer({ steamId, onSignOut, onBack }: ViewerProps) {
   const [state, setState] = useState<TweakState>(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(true);
   const theme = THEMES[state.theme];
@@ -520,7 +539,7 @@ export function Viewer({ steamId, onSignOut }: ViewerProps) {
 
   return (
     <div className="app" style={{ background: theme.bg, color: theme.ink, fontFamily: theme.fontHead }}>
-      <TopBar theme={theme} data={data} steamId={steamId} onSignOut={onSignOut} />
+      <TopBar theme={theme} data={data} steamId={steamId} onSignOut={onSignOut} onBack={onBack} />
       <RoundRail theme={theme} data={data} />
 
       <main className={`stage layout-${state.layout}`}>

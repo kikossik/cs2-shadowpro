@@ -17,6 +17,7 @@ The remaining path to MVP is: extend the parse → extract and index situations 
 - **Backend:** FastAPI.
 - **Frontend:** React + TypeScript. Radar as `<canvas>`.
 - **Maps:** Mirage only for MVP (unchanged).
+- **Auth:** Steam OpenID (not FACEIT — FACEIT dropped due to integration complexity). User demo ingestion pulls demos linked to the authenticated Steam ID.
 
 ## Pipeline at a glance
 
@@ -24,13 +25,13 @@ The remaining path to MVP is: extend the parse → extract and index situations 
 [scrape] → [download] → [decompress] → [parse (reparse w/ more props)]
   → [extract situations] → situations.db
                                  ↑
-FACEIT OAuth → pull last 10 user matches → download → decompress → parse → extract ┘
-                                                                                  ↓
-                                              [match user situation → top-K pro situations]
-                                                                                  ↓
-                                                        [render side-by-side 2D radar clips]
-                                                                                  ↓
-                                                               [per-round report in web app]
+Steam login → pull user matches → download → decompress → parse → extract ┘
+                                                                        ↓
+                                        [match user situation → top-K pro situations]
+                                                                        ↓
+                                                  [render side-by-side 2D radar clips]
+                                                                        ↓
+                                                 [matches landing → per-round report]
 ```
 
 ## Situation schema (concrete)
@@ -117,7 +118,7 @@ Present top 3 per user situation with a **why-it-matched breakdown** ("Same map 
 | DB             | SQLite (`situations.db`)                 | zero-ops, plenty fast at this scale           |
 | Backend        | FastAPI                                  | async, small, native to Python stack          |
 | Frontend       | React + TS + HTML canvas                 | meets "clean modern UI" MVP goal              |
-| Auth           | FACEIT OAuth2 (developer API)            | specified in the product brief                |
+| Auth           | Steam OpenID (already implemented)       | simpler than FACEIT; user owns their Steam ID |
 | Deploy target  | TBD (Fly.io / Railway / Hetzner)         | picked later; compute is mostly one-off index |
 
 ## Milestones
@@ -142,35 +143,36 @@ Present top 3 per user situation with a **why-it-matched breakdown** ("Same map 
 - Eyeball ~20 queries. Tune the scoring weights + thresholds.
 - **This is the point where we know whether the product actually works.** Do not skip.
 
-**M4.5 — Situation Viewer (design implementation)** *(inserted after M4)*
-- Port the Claude Design prototype to a real Vite + React + TS app under `web/`.
-- Static mock data initially (`web/src/mockData.ts`); backend wiring is M6's job.
-- Component intent, themes, layout decisions, and data contract live in `DESIGN.md`.
+**M4.5 — Situation Viewer + Matches landing (design implementation)** *(inserted after M4)* ✓ DONE
+- Vite + React + TS app under `web/`. Viewer (`web/src/Viewer.tsx`) and Matches landing (`web/src/matches/`) both implemented.
+- Steam OpenID login (`web/src/LoginPage.tsx`) integrated; routing: Login → Matches → Viewer.
+- Static mock data; backend wiring is M6's job. `DESIGN.md` covers the data contract.
 
-**M5 — FACEIT ingestion** *(new code, external integration)* - 
-- FACEIT OAuth2 flow (dev API).
-- Pull last 10 matches per user; queue demo downloads.
-- Run the user demos through `decompress → parse → extract` into the same SQLite under `source='user'`.
+**M5 — Steam demo ingestion** *(new code, external integration)*
+- Resolve demo download URLs from a user's Steam ID (Steam Web API or CS2 match history endpoint).
+- Pull last 10 matches; queue demo downloads.
+- Run user demos through `decompress → parse → extract` into the same SQLite under `source='user'`.
+- Note: Steam may not expose demo URLs directly — confirm access method before starting; fallback is manual upload.
 
 **M6 — backend + viewer wiring** *(UI integration)*
-- FastAPI backend exposing `GET /report/{match_id}` and `GET /situation/{id}` that returns the JSON shape the viewer consumes (see `DESIGN.md` § Data contract).
-- Replace `web/src/mockData.ts` with API fetch.
-- React frontend additions: login w/ FACEIT, match list, report list page (the hero viewer is already done in M4.5).
+- FastAPI backend exposing `GET /matches/{steam_id}`, `GET /report/{match_id}`, and `GET /situation/{id}` returning the JSON shapes the frontend consumes (see `DESIGN.md` § Data contract).
+- Replace `web/src/mockData.ts` and `web/src/matches/mockMatches.ts` with API fetches.
+- Wire Steam ID from session to the matches endpoint.
 
 **M7 — scale to 200 + launch polish**
 - Re-run scrape to 200 matches; batch-download + re-index.
 - Landing page, billing (Stripe $5/mo), deploy.
 
-## Critical files to create
+## Critical files to create / created
 
 - `reparse_demo.py` *(or extend `parse_one_demo.py`)* — M1
-- `extract_situations.py` — M2
-- `situations_db.py` (schema + connection helpers) — M2/M3
-- `batch_extract.py` — M3
-- `match_situation.py` — M4
-- `faceit_client.py` — M5
+- `extract_situations.py` — M2 ✓
+- `situations_db.py` (schema + connection helpers) — M2/M3 ✓
+- `batch_extract.py` — M3 ✓
+- `match_situation.py` — M4 ✓
+- `steam_client.py` — M5 (replaces `faceit_client.py`)
 - `server/` (FastAPI app) — M6
-- `web/` (React app) — M6
+- `web/` (React app) — M4.5 ✓
 
 ## Existing utilities to reuse
 
@@ -186,14 +188,15 @@ Present top 3 per user situation with a **why-it-matched breakdown** ("Same map 
 | M2        | `situations_sample.parquet` — manually trace 3 rows back to the notebook; features match.|
 | M3        | `situations.db` row count ≈ expected; indexed categorical query returns in < 50 ms.      |
 | M4        | 15+ out of 20 eyeball queries produce matches a human would accept as "same situation".  |
-| M5        | End-to-end on your own FACEIT demo: user rows appear in DB with `source='user'`.         |
-| M6        | Load a report in the browser; scrub the radar; see side-by-side playback.                |
-| M7        | Live URL, 200 pro demos indexed, FACEIT login works, one paid test transaction.          |
+| M5        | End-to-end on your own Steam demo: user rows appear in DB with `source='user'`.          |
+| M6        | Load a report in the browser; matches list populated from API; scrub the radar.           |
+| M7        | Live URL, 200 pro demos indexed, Steam login works, one paid test transaction.            |
 
 ## Risks / open questions (to revisit, not blockers)
 
 - **`place` granularity** — Mirage's `place` values like `"Mid"` may be too coarse for good matches. Might need to sub-bucket large places by XY quantiles. Defer until M4 eyeballing.
 - **Economy bucket boundaries** — common split: full-buy (≥$4000 + rifle), semi-buy ($2000–$4000), eco (<$2000 or pistol/smg only). Confirm after M1 when `balance` is parsed.
-- **FACEIT demo access** — confirm that the FACEIT dev API actually hands out demo URLs (vs only match metadata). If not, user would need to upload demos manually — degrades the "connect FACEIT" UX. **Check this before M5 to avoid surprise.**
+- **Steam demo access** — CS2 match history may not expose demo download URLs via a public API. Investigate: Steam Web API `GetMatchHistory`, CSGO's `GetRecentMatchStats`, or scraping matchroom URLs. Manual upload is the fallback. **Check this before M5.**
+- **Steam OpenID verification** — `openid.check_authentication` server-side call is currently deferred (noted in `main.tsx`). Must be implemented before M7 launch to prevent spoofed Steam IDs.
 - **Radar asset licensing** — the Mirage radar PNG ships with CS2 assets. Using it in a paid product may or may not be allowed under Valve's content policy. Review before launch.
 - **Compute at M3 scale** — parsing 200 demos sequentially is ~1–2 hrs. Fine as a one-off, but if we iterate on schema, consider caching the parsed Parquets per demo.
