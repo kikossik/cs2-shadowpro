@@ -294,7 +294,9 @@ function WhyMatched({ theme, match }: { theme: Theme; match: Situation["match"] 
   );
 }
 
-function TopBar({ theme, data }: { theme: Theme; data: Situation }) {
+type TopBarProps = { theme: Theme; data: Situation; steamId: string; onSignOut: () => void };
+function TopBar({ theme, data, steamId, onSignOut }: TopBarProps) {
+  const shortId = steamId.slice(-8);
   return (
     <header className="topbar" style={{ borderColor: theme.border, background: theme.panel }}>
       <div className="tb-left">
@@ -322,8 +324,12 @@ function TopBar({ theme, data }: { theme: Theme; data: Situation }) {
         </div>
         <div className="user-chip" style={{ borderColor: theme.border, color: theme.ink, fontFamily: theme.fontMono }}>
           <span className="dot ok" style={{ background: theme.accent }} />
-          k1llj0y · L9
+          STEAM · {shortId}
         </div>
+        <button className="signout-btn" onClick={onSignOut}
+          style={{ color: theme.dim, borderColor: theme.border, fontFamily: theme.fontMono }}>
+          SIGN OUT
+        </button>
       </div>
     </header>
   );
@@ -463,7 +469,8 @@ function PaneOverlay({ theme, data }: { theme: Theme; side: "user" | "pro"; data
   );
 }
 
-export function Viewer() {
+type ViewerProps = { steamId: string; onSignOut: () => void };
+export function Viewer({ steamId, onSignOut }: ViewerProps) {
   const [state, setState] = useState<TweakState>(TWEAK_DEFAULTS);
   const [tweaksOpen, setTweaksOpen] = useState(true);
   const theme = THEMES[state.theme];
@@ -513,7 +520,7 @@ export function Viewer() {
 
   return (
     <div className="app" style={{ background: theme.bg, color: theme.ink, fontFamily: theme.fontHead }}>
-      <TopBar theme={theme} data={data} />
+      <TopBar theme={theme} data={data} steamId={steamId} onSignOut={onSignOut} />
       <RoundRail theme={theme} data={data} />
 
       <main className={`stage layout-${state.layout}`}>

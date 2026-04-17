@@ -485,3 +485,95 @@ button { font: inherit; cursor: pointer; border: 1px solid transparent; backgrou
 *::-webkit-scrollbar { width: 8px; height: 8px; }
 *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); }
 *::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- SIGN-OUT BUTTON (topbar) ---------- */
+.signout-btn {
+  padding: 6px 10px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+  border: 1px solid;
+  color: var(--dim);
+  transition: color .12s, border-color .12s;
+}
+.signout-btn:hover { color: var(--ink); border-color: var(--ink); }
+
+/* ---------- LOGIN PAGE ---------- */
+.login-root {
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+.login-card {
+  display: grid;
+  gap: 28px;
+  text-align: center;
+  width: 100%;
+  max-width: 360px;
+  padding: 48px 40px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.login-mark {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--accent);
+  color: #0e0c09;
+  font-family: var(--fontMono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.login-tagline {
+  color: var(--dim);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+.login-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 24px;
+  background: var(--accent);
+  color: #0e0c09;
+  font-family: var(--fontMono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  transition: opacity .1s;
+}
+.login-btn:hover { opacity: 0.88; }
+
+.login-fine {
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 0;
+  font-family: var(--fontMono);
+  letter-spacing: 0.02em;
+}
