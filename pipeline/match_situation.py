@@ -28,7 +28,7 @@ import math
 import sys
 from pathlib import Path
 
-from situations_db import connect
+from backend.db import connect
 
 # ── Scoring weights (PLAN.md) ──────────────────────────────────────────────────
 W_FEATURE = 0.4   # categorical match (always 1.0; all SQL-filtered)

@@ -15,10 +15,11 @@ from pathlib import Path
 
 from awpy import Demo
 
-from extract_situations import extract
-from situations_db import connect, init_schema, processed_demos, insert_dataframe
+from backend.config import DB_PATH, DEMOS_PRO_DECOMPRESSED_DIR
+from backend.db import connect, init_schema, processed_demos, insert_situations
+from pipeline.extract_situations import extract
 
-DEMO_DIR = Path("demos_decompressed")
+DEMO_DIR = DEMOS_PRO_DECOMPRESSED_DIR
 
 # Kept in sync with parse_one_demo.py — matching player_props is required for
 # the economy bucket (inventory) and any future equipment features.
@@ -62,7 +63,7 @@ def main() -> None:
                 dem.bomb, dem.smokes, dem.infernos,
                 source="pro", demo_id=demo_id,
             )
-            insert_dataframe(conn, situations)
+            insert_situations(conn, situations)
             total_added += situations.height
             elapsed = int(time.monotonic() - t0)
             print(f"  → {situations.height} situations ({elapsed}s)")

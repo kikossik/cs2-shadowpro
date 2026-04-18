@@ -12,7 +12,7 @@ Usage:
 import random
 import time
 
-from situations_db import connect
+from backend.db import connect
 
 MATCH_QUERY = """
 SELECT id, demo_id, round_num, tick, player_steamid,

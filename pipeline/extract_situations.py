@@ -110,6 +110,9 @@ def extract(
     merged = merged.join(alive_counts, on=["round_num", "tick"])
 
     # Round metadata (phase + time_remaining).
+    # bomb_plant / bomb_site are absent when no bomb was planted in the entire match.
+    if "bomb_plant" not in rounds.columns:
+        rounds = rounds.with_columns(pl.lit(None).cast(pl.Int64).alias("bomb_plant"))
     merged = merged.join(
         rounds.select("round_num", "freeze_end", "end", "bomb_plant"),
         on="round_num",

@@ -577,3 +577,71 @@ button { font: inherit; cursor: pointer; border: 1px solid transparent; backgrou
   font-family: var(--fontMono);
   letter-spacing: 0.02em;
 }
+
+/* ---------- SETUP PAGE ---------- */
+.setup-card { max-width: 440px; gap: 24px; text-align: left; }
+
+.setup-step-tag {
+  font-family: var(--fontMono);
+  font-size: 9px; letter-spacing: 0.16em;
+  color: var(--accent);
+  margin: 0 0 6px;
+}
+
+.setup-heading {
+  font-size: 17px; font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 10px;
+}
+
+.setup-link { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.setup-link:hover { opacity: 0.85; }
+
+.setup-field { display: grid; gap: 6px; }
+
+.setup-label {
+  font-family: var(--fontMono);
+  font-size: 9px; letter-spacing: 0.14em;
+  color: var(--dim);
+}
+
+.setup-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--fontMono);
+  font-size: 12px; letter-spacing: 0.04em;
+  padding: 10px 12px;
+  width: 100%;
+  outline: none;
+  transition: border-color .12s;
+}
+.setup-input:focus { border-color: var(--accent); }
+.setup-input::placeholder { color: var(--dim); opacity: 0.45; }
+
+.setup-error {
+  font-family: var(--fontMono);
+  font-size: 10px; letter-spacing: 0.04em;
+  color: #c56b6b;
+  margin: 0;
+}
+
+.setup-skip {
+  font-family: var(--fontMono);
+  font-size: 10px; letter-spacing: 0.08em;
+  color: var(--dim);
+  background: none; border: none;
+  cursor: pointer; text-align: center; padding: 0;
+  justify-self: center;
+}
+.setup-skip:hover { color: var(--ink); }
+
+.setup-spinner {
+  width: 24px; height: 24px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: setup-spin 0.9s linear infinite;
+}
+@keyframes setup-spin { to { transform: rotate(360deg); } }

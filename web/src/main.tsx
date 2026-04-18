@@ -1,16 +1,18 @@
-import { StrictMode, useState } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Viewer } from "./Viewer";
 import { LoginPage } from "./LoginPage";
+import { SetupPage } from "./SetupPage";
 import { MatchesPage } from "./matches/MatchesPage";
 import "./styles.css";
+
+type AppPhase = "login" | "checking" | "setup" | "app";
 
 function parseSteamId(claimedId: string): string | null {
   const m = claimedId.match(/https?:\/\/steamcommunity\.com\/openid\/id\/(\d+)/);
   return m ? m[1] : null;
 }
 
-/** Resolve initial Steam ID from URL return params or sessionStorage. */
 function getInitialSteamId(): string | null {
   const params = new URLSearchParams(window.location.search);
   if (params.get("openid.mode") === "id_res") {
@@ -27,19 +29,42 @@ function getInitialSteamId(): string | null {
 
 function App() {
   const [steamId, setSteamId] = useState<string | null>(getInitialSteamId);
+  const [phase, setPhase] = useState<AppPhase>(() => getInitialSteamId() ? "checking" : "login");
   const [openMatchId, setOpenMatchId] = useState<string | null>(null);
 
   const signOut = () => {
     sessionStorage.removeItem("steam_id");
     setOpenMatchId(null);
     setSteamId(null);
+    setPhase("login");
   };
 
-  if (!steamId) {
+  // After login (or on page reload with existing session), check if setup is complete.
+  useEffect(() => {
+    if (!steamId) { setPhase("login"); return; }
+    setPhase("checking");
+    fetch(`/api/user/${steamId}`)
+      .then((r) => setPhase(r.ok ? "app" : "setup"))
+      .catch(() => setPhase("setup"));
+  }, [steamId]);
+
+  if (!steamId || phase === "login") {
     return <LoginPage onSignedIn={setSteamId} />;
   }
+  if (phase === "checking") {
+    return (
+      <div className="login-root">
+        <div style={{ fontFamily: "var(--fontMono)", fontSize: 11, color: "var(--dim)", letterSpacing: "0.08em" }}>
+          LOADING…
+        </div>
+      </div>
+    );
+  }
+  if (phase === "setup") {
+    return <SetupPage steamId={steamId} onComplete={() => setPhase("app")} onSignOut={signOut} />;
+  }
   if (openMatchId) {
-    return <Viewer steamId={steamId} onSignOut={signOut} onBack={() => setOpenMatchId(null)} />;
+    return <Viewer matchId={openMatchId} steamId={steamId} onSignOut={signOut} onBack={() => setOpenMatchId(null)} />;
   }
   return (
     <MatchesPage

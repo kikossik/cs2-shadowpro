@@ -4,37 +4,23 @@ Poll all registered users for new CS2 Premier matches.
 
 Run on a cron or loop — every 15 minutes is a good cadence:
 
-    # One-shot:
-    /home/tomyan/Code/VENV/cs2_shadowpro/bin/python pipeline/poll_users.py
+    # One-shot (from project root):
+    /home/tomyan/Code/VENV/cs2_shadowpro/bin/python -m pipeline.poll_users
 
-    # Loop (bash):
-    while true; do
-        /home/tomyan/Code/VENV/cs2_shadowpro/bin/python pipeline/poll_users.py
-        sleep 900
-    done
+    # Loop (fish):
+    while true; /home/tomyan/Code/VENV/cs2_shadowpro/bin/python -m pipeline.poll_users; sleep 900; end
 """
 
-import sqlite3
-import sys
 import time
-from pathlib import Path
 
-# Allow imports from project root
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from dotenv import load_dotenv
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-
-from backend.db_users import get_all_users, init_users_table  # noqa: E402
-from backend.user_matches import sync_user  # noqa: E402
-
-DB_PATH = Path(__file__).resolve().parent.parent / "situations.db"
+from backend.config import DB_PATH
+from backend.db import connect, init_schema, get_all_users
+from backend.sync import sync_user
 
 
 def main() -> None:
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    init_users_table(conn)
+    conn = connect(DB_PATH)
+    init_schema(conn)
     users = get_all_users(conn)
     conn.close()
 
@@ -43,7 +29,6 @@ def main() -> None:
         return
 
     print(f"[poll] {len(users)} user(s) to sync")
-
     for user in users:
         steam_id = user["steam_id"]
         print(f"[poll] Syncing {steam_id} ...", end=" ", flush=True)
@@ -52,7 +37,7 @@ def main() -> None:
             print(result)
         except Exception as exc:
             print(f"ERROR: {exc}")
-        time.sleep(2)  # gentle pause between users
+        time.sleep(2)
 
 
 if __name__ == "__main__":

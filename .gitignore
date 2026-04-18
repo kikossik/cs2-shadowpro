@@ -6,7 +6,9 @@ __pycache__/
 
 demos/
 demos_decompressed/
+demos_user/
+*.dem
+*.dem.bz2
 situations.db
-STEAM_NOTES_BOT.txt
 services/sharecode-resolver/node_modules/
 .playwright_steam_state.json
