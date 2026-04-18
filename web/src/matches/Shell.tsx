@@ -1,12 +1,14 @@
-import type { Match, MatchResult } from "./types";
-import { MAP_OPTIONS, RESULT_OPTIONS } from "./mockMatches";
+import type { Match, MatchResult, SteamProfile } from "./types";
+import { MAP_OPTIONS, RESULT_OPTIONS } from "./utils";
 
 type TopBarProps = {
   steamId: string;
+  profile: SteamProfile | null;
   onSignOut: () => void;
+  onImport: () => void;
 };
-export function TopBar({ steamId, onSignOut }: TopBarProps) {
-  const shortId = steamId.slice(-8);
+export function TopBar({ steamId, profile, onSignOut, onImport }: TopBarProps) {
+  const displayName = profile?.personaname ?? `…${steamId.slice(-6)}`;
   return (
     <div className="topbar" role="banner">
       <div className="brand">
@@ -19,10 +21,12 @@ export function TopBar({ steamId, onSignOut }: TopBarProps) {
         <span>select a match to review</span>
       </div>
       <div className="tb-right">
-        <div className="user-chip" title="Signed in via Steam">
-          <span className="avatar" />
-          <span style={{ color: "var(--dim)", letterSpacing: "0.08em" }}>STEAM</span>
-          <span style={{ color: "var(--ink)" }}>{shortId}</span>
+        <button className="import-fab" onClick={onImport}>+ IMPORT DEMO</button>
+        <div className="user-chip" title={`Steam ID: ${steamId}`}>
+          {profile?.avatar
+            ? <img className="avatar" src={profile.avatar} alt="" />
+            : <span className="avatar" />}
+          <span style={{ color: "var(--ink)" }}>{displayName}</span>
         </div>
         <button className="signout-btn" onClick={onSignOut}>SIGN OUT</button>
       </div>
@@ -31,11 +35,13 @@ export function TopBar({ steamId, onSignOut }: TopBarProps) {
 }
 
 type ImportBannerProps = {
-  state: "idle" | "loading" | "done";
+  state: "idle" | "processing" | "done" | "error";
   progress: number;
+  situationsFound?: number;
+  errorMessage?: string;
   onDismiss: () => void;
 };
-export function ImportBanner({ state, progress, onDismiss }: ImportBannerProps) {
+export function ImportBanner({ state, progress, situationsFound, errorMessage, onDismiss }: ImportBannerProps) {
   if (state === "idle") return null;
   if (state === "done") {
     return (
@@ -45,7 +51,19 @@ export function ImportBanner({ state, progress, onDismiss }: ImportBannerProps) 
           IMPORT COMPLETE
         </span>
         <div />
-        <span className="import-count">20 MATCHES · 214 SITUATIONS</span>
+        {situationsFound !== undefined && (
+          <span className="import-count">{situationsFound} SITUATIONS INDEXED</span>
+        )}
+        <button className="import-dismiss" onClick={onDismiss}>DISMISS</button>
+      </div>
+    );
+  }
+  if (state === "error") {
+    return (
+      <div className="import-banner" style={{ borderColor: "var(--loss)" }} role="alert">
+        <span className="import-title" style={{ color: "var(--loss)" }}>IMPORT FAILED</span>
+        <div />
+        <span className="import-count" style={{ color: "var(--dim)" }}>{errorMessage}</span>
         <button className="import-dismiss" onClick={onDismiss}>DISMISS</button>
       </div>
     );
@@ -54,13 +72,13 @@ export function ImportBanner({ state, progress, onDismiss }: ImportBannerProps) 
     <div className="import-banner" role="status">
       <span className="import-title">
         <span className="import-spinner" />
-        IMPORTING FROM STEAM
+        PROCESSING DEMO…
       </span>
       <div className="import-progress-bar">
         <div className="import-progress-fill" style={{ width: `${progress * 100}%` }} />
       </div>
-      <span className="import-count">{Math.floor(progress * 20)}/20</span>
-      <button className="import-dismiss" onClick={onDismiss}>RUN IN BACKGROUND</button>
+      <span className="import-count">parsing + indexing</span>
+      <button className="import-dismiss" onClick={onDismiss}>DISMISS</button>
     </div>
   );
 }
@@ -131,10 +149,11 @@ export function FilterBar({
 
 type RoundStripProps = { rounds: Match["rounds"]; compact?: boolean };
 export function RoundStrip({ rounds, compact }: RoundStripProps) {
-  const padLength = Math.max(0, 24 - rounds.length);
+  const rs = rounds ?? [];
+  const padLength = Math.max(0, 24 - rs.length);
   return (
     <div className={compact ? "tl-rail" : "round-strip"}>
-      {rounds.map((r, i) => (
+      {rs.map((r, i) => (
         <div
           key={i}
           className={`round-dot ${r.side} ${r.won ? "won" : "lost"} ${r.ot ? "ot" : ""}`}

@@ -1,4 +1,4 @@
-import type { Density, ImportState, Layout, MatchesTweakState } from "./types";
+import type { Density, Layout, MatchesTweakState } from "./types";
 
 type TweaksPanelProps = {
   tweaks: MatchesTweakState;
@@ -8,15 +8,10 @@ type TweaksPanelProps = {
 };
 
 const LAYOUTS: Layout[] = ["ledger", "cards", "timeline"];
-const IMPORT_STATES: ImportState[] = ["idle", "loading", "done"];
 const DENSITIES: { k: Density; l: string }[] = [
   { k: "comfortable", l: "COMFORT" },
   { k: "compact", l: "COMPACT" },
 ];
-
-function importLabel(k: ImportState): string {
-  return k === "idle" ? "OFF" : k === "loading" ? "LOAD" : "DONE";
-}
 
 export function TweaksPanel({ tweaks, setTweaks, visible, setVisible }: TweaksPanelProps) {
   if (!visible) {
@@ -46,22 +41,6 @@ export function TweaksPanel({ tweaks, setTweaks, visible, setVisible }: TweaksPa
                 onClick={() => update("layout", k)}
               >
                 {k.toUpperCase()}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="tw-row">
-        <div className="tw-label">IMPORT</div>
-        <div className="tw-ctrl">
-          <div className="tw-seg">
-            {IMPORT_STATES.map((k) => (
-              <button
-                key={k}
-                className={tweaks.importState === k ? "on" : ""}
-                onClick={() => update("importState", k)}
-              >
-                {importLabel(k)}
               </button>
             ))}
           </div>

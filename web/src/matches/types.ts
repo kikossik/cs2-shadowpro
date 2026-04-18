@@ -18,39 +18,37 @@ export type MatchStats = {
   d: number;
   a: number;
   kd: string;
-  adr: number;
-  hs: number;
-  kast: number;
-  rating: string;
-  mvps: number;
+  hs_pct: number;
 };
 
 export type Match = {
   id: string;
   map: MapInfo;
-  date: Date;
-  mode: string;
-  rank: string;
-  opponent: string;
-  myTeam: string;
-  durationMin: number;
-  score: { mine: number; theirs: number };
-  result: MatchResult;
-  userSide: MatchSide;
-  rounds: MatchRound[];
-  stats: MatchStats;
+  /** Unix timestamp (seconds) from the server. */
+  date: number;
+  result: MatchResult | null;
+  user_side_first: MatchSide | null;
+  score: { ct: number; t: number } | null;
+  round_count: number | null;
+  rounds: MatchRound[] | null;
+  stats: MatchStats | null;
   situations: number;
-  topMatch: { pro: string; pct: number };
 };
 
-export type ImportState = "idle" | "loading" | "done";
+export type SteamProfile = {
+  steam_id: string;
+  personaname: string | null;
+  avatar: string | null;
+};
+
+export type ImportState = "idle" | "loading" | "done" | "error";
 export type Layout = "ledger" | "cards" | "timeline";
 export type Density = "comfortable" | "compact";
 
 export type MatchesTweakState = {
   layout: Layout;
-  importState: ImportState;
   density: Density;
   showRoundStrip: boolean;
   skeleton: boolean;
 };
+

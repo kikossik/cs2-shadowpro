@@ -1,6 +1,6 @@
 import type { Match } from "./types";
 import { MapThumb, RoundStrip } from "./Shell";
-import { fmtFullDate, fmtTime } from "./mockMatches";
+import { fmtFullDate, fmtTime } from "./utils";
 
 const EMPTY_ASCII = `
   ┌─────────────┐
@@ -52,32 +52,31 @@ function MatchCard({ m, onOpen, showRoundStrip }: MatchCardProps) {
         <div className="card-top-info">
           <div className="card-map-name">{m.map.display}</div>
           <div className="card-sub">
-            {m.mode.toUpperCase()} · {fmtFullDate(m.date)} · {fmtTime(m.date)} · {m.durationMin}M
+            COMPETITIVE · {fmtFullDate(m.date)} · {fmtTime(m.date)}
           </div>
-          <div className="card-sub" style={{ color: "var(--dimmer)" }}>
-            VS {m.opponent.toUpperCase()} · YOUR START: {m.userSide.toUpperCase()}
-          </div>
+          {m.user_side_first && (
+            <div className="card-sub" style={{ color: "var(--dimmer)" }}>
+              YOUR START: {m.user_side_first.toUpperCase()}
+            </div>
+          )}
         </div>
-        <div className="card-score">
-          <div className="label">
-            <span
-              className="result-tag"
-              style={{
-                color: stripeColor,
-                borderColor: stripeColor,
-                padding: "1px 5px",
-                border: "1px solid",
-              }}
-            >
-              {m.result.toUpperCase()}
-            </span>
+        {m.result && m.score && (
+          <div className="card-score">
+            <div className="label">
+              <span
+                className="result-tag"
+                style={{ color: stripeColor, borderColor: stripeColor, padding: "1px 5px", border: "1px solid" }}
+              >
+                {m.result.toUpperCase()}
+              </span>
+            </div>
+            <div style={{ fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ color: stripeColor }}>{m.score.ct}</span>
+              <span style={{ color: "var(--dimmer)", margin: "0 4px" }}>:</span>
+              <span style={{ color: "var(--dim)" }}>{m.score.t}</span>
+            </div>
           </div>
-          <div style={{ fontVariantNumeric: "tabular-nums" }}>
-            <span style={{ color: stripeColor }}>{m.score.mine}</span>
-            <span style={{ color: "var(--dimmer)", margin: "0 4px" }}>:</span>
-            <span style={{ color: "var(--dim)" }}>{m.score.theirs}</span>
-          </div>
-        </div>
+        )}
       </div>
 
       {showRoundStrip && (
@@ -89,19 +88,11 @@ function MatchCard({ m, onOpen, showRoundStrip }: MatchCardProps) {
       <div className="card-stats">
         <div className="card-stat">
           <div className="cstat-k">K / D / A</div>
-          <div className="cstat-v">{m.stats.k}·{m.stats.d}·{m.stats.a}</div>
-        </div>
-        <div className="card-stat">
-          <div className="cstat-k">ADR</div>
-          <div className="cstat-v">{m.stats.adr}</div>
+          <div className="cstat-v">{m.stats ? `${m.stats.k}·${m.stats.d}·${m.stats.a}` : "—"}</div>
         </div>
         <div className="card-stat">
           <div className="cstat-k">HS%</div>
-          <div className="cstat-v">{m.stats.hs}</div>
-        </div>
-        <div className="card-stat">
-          <div className="cstat-k">KAST</div>
-          <div className="cstat-v">{m.stats.kast}</div>
+          <div className="cstat-v">{m.stats ? `${m.stats.hs_pct}%` : "—"}</div>
         </div>
         <div className="card-stat">
           <div className="cstat-k">SITUATIONS</div>
@@ -110,9 +101,8 @@ function MatchCard({ m, onOpen, showRoundStrip }: MatchCardProps) {
       </div>
 
       <div className="card-foot">
-        <span>
-          TOP MATCH: <span style={{ color: "var(--ink)" }}>{m.topMatch.pro}</span>
-          <span style={{ color: "var(--accent)", marginLeft: 6 }}>{m.topMatch.pct}%</span>
+        <span style={{ color: "var(--dim)" }}>
+          {m.round_count ? `${m.round_count} ROUNDS` : ""}
         </span>
         <span className="cta">REVIEW →</span>
       </div>

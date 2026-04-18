@@ -1,5 +1,39 @@
 # Plan: End-to-end roadmap for CS2 ShadowPro MVP
 
+## Repo structure (as of April 2026)
+
+```
+cs2-shadowpro/
+  pipeline/              All data-processing scripts (moved from root)
+    scrape_hltv_demos.py
+    download_demos.py
+    decompress_demos.py
+    parse_one_demo.py
+    extract_situations.py
+    batch_extract.py
+    match_situation.py
+    situations_db.py     Schema + DB helpers; also imported by backend
+    check_query_latency.py
+  backend/               FastAPI app
+    main.py              Routes: /api/profile, /api/matches, /api/import
+    steam_api.py         Steam Web API helpers (profile fetch)
+    processing.py        Background demo processing (parse→extract→index)
+  notebooks/
+    explore_demo_data.ipynb
+  web/                   React + TypeScript frontend
+  demos/                 Pro demo archives (.dem.bz2)
+  demos_decompressed/    Extracted pro .dem files
+  demos_user/            User-uploaded .dem files
+  situations.db          SQLite index (situations + matches tables)
+  .env                   STEAM_API_KEY (copy from .env.example)
+  .env.example
+  requirements.txt
+```
+
+Run scripts: `cd cs2-shadowpro && /path/to/venv/bin/python pipeline/<script>.py`
+Run backend: `uvicorn backend.main:app --reload --port 8000`
+Run frontend: `cd web && npm run dev`  (proxies /api → :8000)
+
 ## Context
 
 Ingest + exploratory parse are done: `scrape_hltv_demos.py` (50 Mirage matches), `download_demos.py` (47 `.dem.bz2`), `decompress_demos.py` (extracts Mirage map from the RAR), `parse_one_demo.py` (one demo → 12 Parquet tables via `awpy`), and `explore_demo_data.ipynb` (cell-by-cell tour of every DataFrame).
@@ -148,18 +182,19 @@ Present top 3 per user situation with a **why-it-matched breakdown** ("Same map 
 - Steam OpenID login (`web/src/LoginPage.tsx`) integrated; routing: Login → Matches → Viewer.
 - Static mock data; backend wiring is M6's job. `DESIGN.md` covers the data contract.
 
-**M5 — Steam demo ingestion** *(new code, external integration)*
-- Resolve demo download URLs from a user's Steam ID (Steam Web API or CS2 match history endpoint).
-- Pull last 10 matches; queue demo downloads.
-- Run user demos through `decompress → parse → extract` into the same SQLite under `source='user'`.
-- Note: Steam may not expose demo URLs directly — confirm access method before starting; fallback is manual upload.
+**M5 — Real data + repo structure** *(done)*
+- Moved all pipeline scripts to `pipeline/`, notebook to `notebooks/`, created `backend/`.
+- Added `matches` table to `situations_db.py` (demo_id, map, score, user_result, K/D/A/HS%, situations_count).
+- FastAPI backend: `GET /api/profile/{steam_id}` (Steam API), `GET /api/matches/{steam_id}` (DB), `POST /api/import` (demo upload + background processing), `GET /api/import/{job_id}` (status).
+- Frontend: removed all mock data; fetches from API; shows real Steam name/avatar; file-upload import flow with progress polling; empty state prompt.
+- `.env` / `.env.example` with `STEAM_API_KEY`.
 
-**M6 — backend + viewer wiring** *(UI integration)*
-- FastAPI backend exposing `GET /matches/{steam_id}`, `GET /report/{match_id}`, and `GET /situation/{id}` returning the JSON shapes the frontend consumes (see `DESIGN.md` § Data contract).
-- Replace `web/src/mockData.ts` and `web/src/matches/mockMatches.ts` with API fetches.
-- Wire Steam ID from session to the matches endpoint.
+**M6 — Situation viewer wiring + backend for viewer** *(next)*
+- Wire `GET /api/situation/{id}` returning the JSON shape `<Viewer>` consumes (see `DESIGN.md` § Data contract).
+- Replace `web/src/mockData.ts` with API fetch.
+- Wire Steam ID from session to the matches endpoint (server-side OpenID verification — currently trusted client-side).
 
-**M7 — scale to 200 + launch polish**
+**M7 — Scale to 200 + launch polish**
 - Re-run scrape to 200 matches; batch-download + re-index.
 - Landing page, billing (Stripe $5/mo), deploy.
 

@@ -1,6 +1,6 @@
 import type { Match } from "./types";
 import { MapThumb, RoundStrip } from "./Shell";
-import { fmtDay, fmtFullDate, fmtTime, groupByDay } from "./mockMatches";
+import { fmtDay, fmtFullDate, fmtTime, groupByDay } from "./utils";
 
 const EMPTY_ASCII = `
   ┌─────────────┐
@@ -21,7 +21,7 @@ export function TimelineLayout({ matches, showRoundStrip, onOpen }: TimelineLayo
           <div className="timeline-day">
             <div className="timeline-day-tag">
               <div className="tl-day-label">{fmtDay(g.date)}</div>
-              <div className="tl-day-date">{fmtFullDate(g.date)}</div>
+              <div className="tl-day-date">{fmtFullDate(g.matches[0].date)}</div>
               <div className="tl-day-sub">
                 {g.matches.length} MATCH{g.matches.length === 1 ? "" : "ES"}
               </div>
@@ -76,18 +76,20 @@ function TimelineMatch({ m, onOpen, showRoundStrip }: TimelineMatchProps) {
         <div className="tl-map-block">
           <div className="tl-map-name">{m.map.display}</div>
           <div className="tl-score">
-            <span style={{ color: stripeColor }}>{m.score.mine}</span>
-            <span style={{ color: "var(--dimmer)", margin: "0 3px" }}>:</span>
-            <span>{m.score.theirs}</span>
-            <span style={{ color: "var(--dimmer)", margin: "0 8px" }}>·</span>
-            <span>VS {m.opponent.toUpperCase()}</span>
+            {m.score
+              ? <>
+                  <span style={{ color: stripeColor }}>{m.score.ct}</span>
+                  <span style={{ color: "var(--dimmer)", margin: "0 3px" }}>:</span>
+                  <span>{m.score.t}</span>
+                </>
+              : <span style={{ color: "var(--dim)" }}>—</span>
+            }
           </div>
         </div>
         {showRoundStrip ? <RoundStrip rounds={m.rounds} compact /> : <div />}
         <div className="tl-stats">
-          <div className="stat"><span className="k">K/D</span><span className="v">{m.stats.kd}</span></div>
-          <div className="stat"><span className="k">ADR</span><span className="v">{m.stats.adr}</span></div>
-          <div className="stat"><span className="k">HS</span><span className="v">{m.stats.hs}%</span></div>
+          <div className="stat"><span className="k">K/D</span><span className="v">{m.stats?.kd ?? "—"}</span></div>
+          <div className="stat"><span className="k">HS</span><span className="v">{m.stats ? `${m.stats.hs_pct}%` : "—"}</span></div>
           <div className="stat"><span className="k">SIT</span><span className="v accent">{m.situations}</span></div>
         </div>
       </div>

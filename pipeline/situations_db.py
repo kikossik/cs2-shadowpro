@@ -13,6 +13,27 @@ import polars as pl
 
 DB_PATH = Path("situations.db")
 
+MATCHES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS matches (
+    demo_id           TEXT    PRIMARY KEY,
+    source            TEXT    NOT NULL,
+    steam_id          TEXT,
+    map               TEXT,
+    date_ts           INTEGER,
+    round_count       INTEGER,
+    score_ct          INTEGER,
+    score_t           INTEGER,
+    user_side_first   TEXT,
+    user_result       TEXT,
+    kills             INTEGER,
+    deaths            INTEGER,
+    assists           INTEGER,
+    hs_pct            INTEGER,
+    situations_count  INTEGER,
+    processed_at      INTEGER NOT NULL
+);
+"""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS situations (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,9 +88,22 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA)
+    conn.executescript(MATCHES_SCHEMA + SCHEMA)
     for idx in INDEXES:
         conn.execute(idx)
+    conn.commit()
+
+
+def upsert_match(conn: sqlite3.Connection, **fields) -> None:
+    """Insert or replace a match record. Pass keyword args matching the matches table columns."""
+    import time as _time
+    fields.setdefault("processed_at", int(_time.time()))
+    cols = list(fields.keys())
+    placeholders = ",".join(["?"] * len(cols))
+    conn.execute(
+        f"INSERT OR REPLACE INTO matches ({','.join(cols)}) VALUES ({placeholders})",
+        list(fields.values()),
+    )
     conn.commit()
 
 

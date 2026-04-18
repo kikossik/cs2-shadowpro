@@ -1,6 +1,6 @@
 import type { Match } from "./types";
 import { MapThumb, RoundStrip } from "./Shell";
-import { fmtFullDate, fmtTime } from "./mockMatches";
+import { fmtFullDate, fmtTime } from "./utils";
 
 const EMPTY_ASCII = `
   ┌─────────────┐
@@ -22,7 +22,6 @@ export function LedgerLayout({ matches, compact, showRoundStrip, onOpen }: Ledge
         <div>MATCH</div>
         <div>SCORE</div>
         <div>K / D / A</div>
-        <div>ADR</div>
         <div>HS%</div>
         <div>{showRoundStrip ? "ROUNDS" : ""}</div>
         <div>SITUATIONS</div>
@@ -52,7 +51,9 @@ function LedgerRow({ m, showRoundStrip, onOpen }: LedgerRowProps) {
     m.result === "win" ? "var(--win)" :
     m.result === "loss" ? "var(--loss)" :
     "var(--draw)";
-  const kdDelta = m.stats.k - m.stats.d;
+  const k = m.stats?.k ?? 0;
+  const d = m.stats?.d ?? 0;
+  const kdDelta = k - d;
   return (
     <div
       className="ledger-row"
@@ -66,43 +67,49 @@ function LedgerRow({ m, showRoundStrip, onOpen }: LedgerRowProps) {
       <div className="map-info">
         <div className="map-name">{m.map.display}</div>
         <div className="map-sub">
-          {m.mode.toUpperCase()} · {fmtFullDate(m.date)} {fmtTime(m.date)} · {m.durationMin}M
+          COMPETITIVE · {fmtFullDate(m.date)} {fmtTime(m.date)}
         </div>
       </div>
       <div className="score-cell">
-        <span className={`mine ${m.result}`}>{m.score.mine}</span>
-        <span className="sep">:</span>
-        <span className="theirs">{m.score.theirs}</span>
-        <span className={`result-tag rtag-${m.result}`}>
-          {m.result === "win" ? "W" : m.result === "loss" ? "L" : "D"}
-        </span>
+        {m.score
+          ? <>
+              <span className={`mine ${m.result ?? ""}`}>{m.score.ct}</span>
+              <span className="sep">:</span>
+              <span className="theirs">{m.score.t}</span>
+              {m.result && (
+                <span className={`result-tag rtag-${m.result}`}>
+                  {m.result === "win" ? "W" : m.result === "loss" ? "L" : "D"}
+                </span>
+              )}
+            </>
+          : <span style={{ color: "var(--dim)" }}>—</span>
+        }
       </div>
       <div className="kd-cell">
-        <span>{m.stats.k}-{m.stats.d}-{m.stats.a}</span>
-        <span className={`delta ${kdDelta > 0 ? "pos" : kdDelta < 0 ? "neg" : ""}`}>
-          {kdDelta > 0 ? "+" : ""}{kdDelta}
-        </span>
+        {m.stats
+          ? <>
+              <span>{m.stats.k}-{m.stats.d}-{m.stats.a}</span>
+              <span className={`delta ${kdDelta > 0 ? "pos" : kdDelta < 0 ? "neg" : ""}`}>
+                {kdDelta > 0 ? "+" : ""}{kdDelta}
+              </span>
+            </>
+          : <span style={{ color: "var(--dim)" }}>—</span>
+        }
       </div>
-      <div className="num-cell">{m.stats.adr}</div>
-      <div className="num-cell dim">{m.stats.hs}%</div>
+      <div className="num-cell dim">{m.stats ? `${m.stats.hs_pct}%` : "—"}</div>
       <div>
         {showRoundStrip ? <RoundStrip rounds={m.rounds} /> : (
-          <span style={{
-            fontFamily: "var(--fontMono)", fontSize: 10,
-            color: "var(--dim)", letterSpacing: "0.06em",
-          }}>
-            {m.userSide.toUpperCase()} START
-          </span>
+          m.user_side_first
+            ? <span style={{ fontFamily: "var(--fontMono)", fontSize: 10, color: "var(--dim)", letterSpacing: "0.06em" }}>
+                {m.user_side_first.toUpperCase()} START
+              </span>
+            : null
         )}
       </div>
       <div className="situations-cell">
         <span className="sit-count">
           <span className="n">{m.situations}</span>
           <span className="lbl">SIT</span>
-        </span>
-        <span className="top-match">
-          {m.topMatch.pro}<br />
-          <span className="pct">{m.topMatch.pct}%</span>
         </span>
       </div>
       <div className="chevron">›</div>
