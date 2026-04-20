@@ -1,9 +1,9 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Viewer } from "./Viewer";
 import { LoginPage } from "./LoginPage";
 import { SetupPage } from "./SetupPage";
 import { MatchesPage } from "./matches/MatchesPage";
+import { Viewer } from "./Viewer";
 import "./styles.css";
 
 type AppPhase = "login" | "checking" | "setup" | "app";
@@ -27,14 +27,21 @@ function getInitialSteamId(): string | null {
   return sessionStorage.getItem("steam_id");
 }
 
+type ReplayTarget = {
+  demoId: string;
+  roundNum: number;
+  roundCount?: number | null;
+  mapDisplay?: string | null;
+};
+
 function App() {
   const [steamId, setSteamId] = useState<string | null>(getInitialSteamId);
   const [phase, setPhase] = useState<AppPhase>(() => getInitialSteamId() ? "checking" : "login");
-  const [openMatchId, setOpenMatchId] = useState<string | null>(null);
+  const [replayTarget, setReplayTarget] = useState<ReplayTarget | null>(null);
 
   const signOut = () => {
     sessionStorage.removeItem("steam_id");
-    setOpenMatchId(null);
+    setReplayTarget(null);
     setSteamId(null);
     setPhase("login");
   };
@@ -63,13 +70,23 @@ function App() {
   if (phase === "setup") {
     return <SetupPage steamId={steamId} onComplete={() => setPhase("app")} onSignOut={signOut} />;
   }
-  if (openMatchId) {
-    return <Viewer matchId={openMatchId} steamId={steamId} onSignOut={signOut} onBack={() => setOpenMatchId(null)} />;
+  if (replayTarget) {
+    return (
+      <Viewer
+        matchId={replayTarget.demoId}
+        steamId={steamId}
+        initialRound={replayTarget.roundNum}
+        roundCount={replayTarget.roundCount ?? null}
+        mapDisplay={replayTarget.mapDisplay ?? null}
+        onBack={() => setReplayTarget(null)}
+        onSignOut={signOut}
+      />
+    );
   }
   return (
     <MatchesPage
       steamId={steamId}
-      onOpenMatch={setOpenMatchId}
+      onOpenReplay={(demoId, roundNum, extra) => setReplayTarget({ demoId, roundNum, ...extra })}
       onSignOut={signOut}
     />
   );

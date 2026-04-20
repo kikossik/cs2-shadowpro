@@ -28,13 +28,15 @@ function loadTweaks(): MatchesTweakState {
 
 type ImportState = "idle" | "processing" | "done" | "error";
 
+type ReplayExtra = { roundCount?: number | null; mapDisplay?: string | null };
+
 type MatchesPageProps = {
   steamId: string;
-  onOpenMatch: (matchId: string) => void;
+  onOpenReplay: (demoId: string, roundNum: number, extra?: ReplayExtra) => void;
   onSignOut: () => void;
 };
 
-export function MatchesPage({ steamId, onOpenMatch, onSignOut }: MatchesPageProps) {
+export function MatchesPage({ steamId, onOpenReplay, onSignOut }: MatchesPageProps) {
   const [tweaks, setTweaks] = useState<MatchesTweakState>(loadTweaks);
   const [tweaksVisible, setTweaksVisible] = useState(false);
   const [mapFilter, setMapFilter] = useState("All maps");
@@ -162,7 +164,8 @@ export function MatchesPage({ steamId, onOpenMatch, onSignOut }: MatchesPageProp
     return arr;
   }, [matches, mapFilter, resultFilter]);
 
-  const onOpen = (m: Match) => onOpenMatch(m.id);
+  const onOpen = (m: Match) =>
+    onOpenReplay(m.id, 1, { roundCount: m.round_count, mapDisplay: m.map.display });
   const showSkeleton = tweaks.skeleton || loading;
 
   return (
@@ -201,6 +204,7 @@ export function MatchesPage({ steamId, onOpenMatch, onSignOut }: MatchesPageProp
               compact={tweaks.density === "compact"}
               showRoundStrip={tweaks.showRoundStrip}
               onOpen={onOpen}
+              onOpenReplay={(demoId) => onOpenReplay(demoId, 1)}
             />
           ) : tweaks.layout === "cards" ? (
             <CardsLayout

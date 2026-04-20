@@ -175,7 +175,7 @@ app.get("/health", (_req, res) => {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, "127.0.0.1", () => {
-  console.log(`[resolver] Listening on http://127.0.0.1:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`[resolver] Listening on http://0.0.0.0:${PORT}`);
   login();
 });

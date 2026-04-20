@@ -1,14 +1,34 @@
+# Python
 __pycache__/
 *.py[cod]
-.claude/
+*.pyo
+.venv/
 
+# Environment
 .env
 
-demos/
-demos_decompressed/
+# Demo files (large binary data)
+demos_pro/decompressed/
+demos_pro/one_off/
 demos_user/
 *.dem
 *.dem.bz2
-situations.db
+
+# Parquet outputs (pipeline-generated data)
+parquet_pro/
+parquet_user/
+
+# Database files
+*.db
+*.sqlite
+
+# Node
 services/sharecode-resolver/node_modules/
+web/node_modules/
+web/dist/
+
+# Misc
+.DS_Store
+.claude/
+.codex
 .playwright_steam_state.json

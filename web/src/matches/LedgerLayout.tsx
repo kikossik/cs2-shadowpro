@@ -13,8 +13,9 @@ type LedgerLayoutProps = {
   compact: boolean;
   showRoundStrip: boolean;
   onOpen: (m: Match) => void;
+  onOpenReplay: (demoId: string) => void;
 };
-export function LedgerLayout({ matches, compact, showRoundStrip, onOpen }: LedgerLayoutProps) {
+export function LedgerLayout({ matches, compact, showRoundStrip, onOpen, onOpenReplay }: LedgerLayoutProps) {
   return (
     <div className={`ledger ${compact ? "compact" : ""}`}>
       <div className="ledger-head">
@@ -28,7 +29,7 @@ export function LedgerLayout({ matches, compact, showRoundStrip, onOpen }: Ledge
         <div />
       </div>
       {matches.map((m) => (
-        <LedgerRow key={m.id} m={m} showRoundStrip={showRoundStrip} onOpen={onOpen} />
+        <LedgerRow key={m.id} m={m} showRoundStrip={showRoundStrip} onOpen={onOpen} onOpenReplay={onOpenReplay} />
       ))}
       {matches.length === 0 && (
         <div className="empty-state">
@@ -45,8 +46,9 @@ type LedgerRowProps = {
   m: Match;
   showRoundStrip: boolean;
   onOpen: (m: Match) => void;
+  onOpenReplay: (demoId: string) => void;
 };
-function LedgerRow({ m, showRoundStrip, onOpen }: LedgerRowProps) {
+function LedgerRow({ m, showRoundStrip, onOpen, onOpenReplay }: LedgerRowProps) {
   const stripeColor =
     m.result === "win" ? "var(--win)" :
     m.result === "loss" ? "var(--loss)" :
@@ -112,7 +114,21 @@ function LedgerRow({ m, showRoundStrip, onOpen }: LedgerRowProps) {
           <span className="lbl">SIT</span>
         </span>
       </div>
-      <div className="chevron">›</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button
+          style={{
+            background: "none", border: "1px solid #3a3a52", color: "#7070a0",
+            padding: "2px 7px", cursor: "pointer", fontFamily: "monospace",
+            fontSize: 11, borderRadius: 3, lineHeight: 1.4,
+          }}
+          title="Watch round replay"
+          onClick={(e) => { e.stopPropagation(); onOpenReplay(m.id); }}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); onOpenReplay(m.id); } }}
+        >
+          ⏵
+        </button>
+        <span className="chevron">›</span>
+      </div>
     </div>
   );
 }

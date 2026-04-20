@@ -1,0 +1,104 @@
+services:
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cs2shadowpro
+      POSTGRES_USER: cs2shadowpro
+      POSTGRES_PASSWORD: cs2shadowpro
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cs2shadowpro"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  resolver:
+    build:
+      context: ./services/sharecode-resolver
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      RESOLVER_PORT: "3001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3001/health | grep -q '\"gcReady\":true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  web:
+    build: .
+    restart: unless-stopped
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://cs2shadowpro:cs2shadowpro@db/cs2shadowpro
+      RESOLVER_URL: http://resolver:3001
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./demos_user:/app/demos_user
+      - ./demos_pro:/app/demos_pro
+      - ./parquet_user:/app/parquet_user
+      - ./parquet_pro:/app/parquet_pro
+    depends_on:
+      db:
+        condition: service_healthy
+      resolver:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: python -m backend.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://cs2shadowpro:cs2shadowpro@db/cs2shadowpro
+      RESOLVER_URL: http://resolver:3001
+      SYNC_INTERVAL_SECONDS: "300"
+    volumes:
+      - ./demos_user:/app/demos_user
+      - ./parquet_user:/app/parquet_user
+    depends_on:
+      db:
+        condition: service_healthy
+      resolver:
+        condition: service_healthy
+
+  pro-scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile.scraper
+    restart: unless-stopped
+    shm_size: "1gb"
+    command:
+      - sh
+      - -lc
+      - |
+        echo "[pro-scraper] wrapper starting"
+        rm -f /tmp/.X99-lock
+        Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+        XVFB_PID=$$!
+        export DISPLAY=:99
+        # Wait briefly for Xvfb to come up (no xdpyinfo in image, so just sleep)
+        sleep 1
+        echo "[pro-scraper] Xvfb pid=$$XVFB_PID DISPLAY=$$DISPLAY"
+        exec python -u -m backend.pro_scraper
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://cs2shadowpro:cs2shadowpro@db/cs2shadowpro
+      PRO_SCRAPER_INTERVAL_SECONDS: "86400"
+      PLAYWRIGHT_HEADLESS: "0"
+    volumes:
+      - ./demos_pro:/app/demos_pro
+      - ./parquet_pro:/app/parquet_pro
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:

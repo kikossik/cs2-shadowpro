@@ -31,14 +31,6 @@ function genRounds(
   return rounds;
 }
 
-const OPPONENTS = [
-  "DM-SHAKURA", "vertigo.", "OBLIVION 7", "kaszpiR",
-  "Team Frost", "mikonki", "ZOOM-Z", "bluevelvet",
-  "cold brew", "nvm", "K.O.L.O", "snip3r",
-];
-
-const PRO_NAMES = ["NiKo", "s1mple", "ZywOo", "donk", "m0NESY", "b1t", "sh1ro", "ropz", "device"];
-
 export const MOCK_MATCHES: Match[] = (() => {
   const rnd = RNG(42);
   const arr: Match[] = [];
@@ -69,14 +61,8 @@ export const MOCK_MATCHES: Match[] = (() => {
     const kills = Math.floor(12 + rnd() * 20);
     const deaths = Math.floor(10 + rnd() * 16);
     const assists = Math.floor(2 + rnd() * 8);
-    const adr = Math.floor(55 + rnd() * 70);
     const hs = Math.floor(30 + rnd() * 45);
-    const kast = Math.floor(55 + rnd() * 30);
-    const rating = (0.7 + rnd() * 0.8).toFixed(2);
-    const mvps = Math.floor(rnd() * 5);
     const situations = 4 + Math.floor(rnd() * 14);
-    const topPct = 72 + Math.floor(rnd() * 24);
-    const topPro = PRO_NAMES[Math.floor(rnd() * PRO_NAMES.length)];
 
     const minutesAgo = i * 47 + Math.floor(rnd() * 30);
     const date = new Date(now.getTime() - minutesAgo * 60 * 1000);
@@ -84,23 +70,18 @@ export const MOCK_MATCHES: Match[] = (() => {
     arr.push({
       id: `m_${String(i).padStart(4, "0")}`,
       map,
-      date,
-      mode: rnd() > 0.3 ? "Premier" : "Competitive",
-      rank: rnd() > 0.3 ? `${15000 + Math.floor(rnd() * 5000)}` : "DMG",
-      opponent: OPPONENTS[i % OPPONENTS.length],
-      myTeam: "Stirfry Squad",
-      durationMin: 38 + Math.floor(rnd() * 24),
-      score: { mine: mineWins, theirs: theirWins },
+      date: Math.floor(date.getTime() / 1000),
+      score: { ct: mineWins, t: theirWins },
       result,
-      userSide,
+      user_side_first: userSide,
+      round_count: total,
       rounds,
       stats: {
         k: kills, d: deaths, a: assists,
         kd: (kills / Math.max(1, deaths)).toFixed(2),
-        adr, hs, kast, rating, mvps,
+        hs_pct: hs,
       },
       situations,
-      topMatch: { pro: topPro, pct: topPct },
     });
   }
   return arr;
@@ -120,7 +101,7 @@ export type DayGroup = { date: Date; matches: Match[] };
 export function groupByDay(matches: Match[]): DayGroup[] {
   const groups = new Map<string, DayGroup>();
   for (const m of matches) {
-    const d = m.date;
+    const d = new Date(m.date * 1000);
     const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
     if (!groups.has(key)) groups.set(key, { date: d, matches: [] });
     groups.get(key)!.matches.push(m);
@@ -136,10 +117,10 @@ export function fmtDay(d: Date): string {
   return d.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase();
 }
 
-export function fmtFullDate(d: Date): string {
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
+export function fmtFullDate(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
 }
 
-export function fmtTime(d: Date): string {
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+export function fmtTime(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
 }

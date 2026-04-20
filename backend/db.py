@@ -1,164 +1,301 @@
-"""
-Unified database layer — all tables, one connect(), one schema init.
-Replaces the old pipeline/situations_db.py + backend/db_users.py split.
-"""
+"""PostgreSQL connection pool and typed async query helpers."""
+from __future__ import annotations
 
-import sqlite3
-import time
-from pathlib import Path
+import asyncpg
 
-import polars as pl
+from backend import config
 
-from backend.config import DB_PATH
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS matches (
-    demo_id           TEXT    PRIMARY KEY,
-    source            TEXT    NOT NULL,
-    steam_id          TEXT,
-    map               TEXT,
-    date_ts           INTEGER,
-    round_count       INTEGER,
-    score_ct          INTEGER,
-    score_t           INTEGER,
-    user_side_first   TEXT,
-    user_result       TEXT,
-    kills             INTEGER,
-    deaths            INTEGER,
-    assists           INTEGER,
-    hs_pct            INTEGER,
-    situations_count  INTEGER,
-    processed_at      INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS situations (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    source            TEXT    NOT NULL,
-    demo_id           TEXT    NOT NULL,
-    round_num         INTEGER NOT NULL,
-    tick              INTEGER NOT NULL,
-    source_event      TEXT    NOT NULL,
-    player_steamid    INTEGER NOT NULL,
-    player_name       TEXT,
-    player_side       TEXT    NOT NULL,
-    player_place      TEXT,
-    player_x          REAL,
-    player_y          REAL,
-    player_z          REAL,
-    balance           INTEGER,
-    active_weapon     INTEGER,
-    economy_bucket    TEXT,
-    alive_ct          INTEGER,
-    alive_t           INTEGER,
-    phase             TEXT,
-    time_remaining_s  REAL,
-    smokes_active     INTEGER,
-    mollies_active    INTEGER,
-    clip_start_tick   INTEGER,
-    clip_end_tick     INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS users (
-    steam_id           TEXT PRIMARY KEY,
-    match_auth_code    TEXT,
-    last_share_code    TEXT,
-    created_at         INTEGER NOT NULL,
-    updated_at         INTEGER NOT NULL
-);
-"""
-
-_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_sit_match "
-    "ON situations(source, player_place, player_side, alive_ct, alive_t, phase, economy_bucket);",
-    "CREATE INDEX IF NOT EXISTS idx_sit_demo ON situations(demo_id);",
-]
-
-_INSERT_COLS = [
-    "source", "demo_id", "round_num", "tick", "source_event",
-    "player_steamid", "player_name", "player_side", "player_place",
-    "player_x", "player_y", "player_z", "balance", "active_weapon",
-    "economy_bucket", "alive_ct", "alive_t", "phase", "time_remaining_s",
-    "smokes_active", "mollies_active", "clip_start_tick", "clip_end_tick",
-]
+_pool: asyncpg.Pool | None = None
 
 
-def connect(path: Path = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
-    return conn
+async def get_pool() -> asyncpg.Pool:
+    global _pool
+    if _pool is None:
+        _pool = await asyncpg.create_pool(
+            dsn=config.DATABASE_URL,
+            min_size=2,
+            max_size=10,
+        )
+    return _pool
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(_SCHEMA)
-    for idx in _INDEXES:
-        conn.execute(idx)
-    conn.commit()
+async def close_pool() -> None:
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
 
 
-# ── situations ─────────────────────────────────────────────────────────────────
+# ── Maps ───────────────────────────────────────────────────────────────────────
 
-def insert_situations(conn: sqlite3.Connection, df: pl.DataFrame) -> None:
-    rows = df.select(_INSERT_COLS).rows()
-    placeholders = ",".join(["?"] * len(_INSERT_COLS))
-    conn.executemany(
-        f"INSERT INTO situations ({','.join(_INSERT_COLS)}) VALUES ({placeholders})",
-        rows,
+async def get_maps() -> list[dict]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        "SELECT map_name, display_name, pos_x, pos_y, map_scale, "
+        "       has_lower_level, lower_level_max_z "
+        "FROM maps ORDER BY display_name"
     )
-    conn.commit()
+    return [dict(r) for r in rows]
 
 
-def processed_demos(conn: sqlite3.Connection, source: str = "pro") -> set[str]:
-    rows = conn.execute(
-        "SELECT DISTINCT demo_id FROM situations WHERE source = ?", (source,)
-    ).fetchall()
-    return {r[0] for r in rows}
+# ── Users ──────────────────────────────────────────────────────────────────────
 
-
-# ── matches ────────────────────────────────────────────────────────────────────
-
-def upsert_match(conn: sqlite3.Connection, **fields) -> None:
-    fields.setdefault("processed_at", int(time.time()))
-    cols = list(fields.keys())
-    conn.execute(
-        f"INSERT OR REPLACE INTO matches ({','.join(cols)}) "
-        f"VALUES ({','.join(['?'] * len(cols))})",
-        list(fields.values()),
+async def get_user(steam_id: str) -> dict | None:
+    pool = await get_pool()
+    row  = await pool.fetchrow(
+        "SELECT * FROM users WHERE steam_id = $1", steam_id
     )
-    conn.commit()
+    return dict(row) if row else None
 
 
-# ── users ──────────────────────────────────────────────────────────────────────
-
-def upsert_user(
-    conn: sqlite3.Connection,
+async def upsert_user(
     steam_id: str,
     match_auth_code: str | None = None,
     last_share_code: str | None = None,
 ) -> None:
-    now = int(time.time())
-    conn.execute(
+    pool = await get_pool()
+    await pool.execute(
         """
-        INSERT INTO users (steam_id, match_auth_code, last_share_code, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(steam_id) DO UPDATE SET
-            match_auth_code = COALESCE(excluded.match_auth_code, match_auth_code),
-            last_share_code = COALESCE(excluded.last_share_code, last_share_code),
-            updated_at      = excluded.updated_at
+        INSERT INTO users (steam_id, match_auth_code, last_share_code, updated_at)
+        VALUES ($1, $2, $3, NOW())
+        ON CONFLICT (steam_id) DO UPDATE
+            SET match_auth_code = COALESCE($2, users.match_auth_code),
+                last_share_code = COALESCE($3, users.last_share_code),
+                updated_at      = NOW()
         """,
-        (steam_id, match_auth_code, last_share_code, now, now),
+        steam_id, match_auth_code, last_share_code,
     )
-    conn.commit()
 
 
-def get_user(conn: sqlite3.Connection, steam_id: str) -> dict | None:
-    row = conn.execute("SELECT * FROM users WHERE steam_id = ?", (steam_id,)).fetchone()
+async def update_last_share_code(steam_id: str, code: str) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        "UPDATE users SET last_share_code = $2, updated_at = NOW() WHERE steam_id = $1",
+        steam_id, code,
+    )
+
+
+async def get_all_users() -> list[dict]:
+    pool = await get_pool()
+    rows = await pool.fetch("SELECT * FROM users ORDER BY created_at")
+    return [dict(r) for r in rows]
+
+
+# ── User matches ───────────────────────────────────────────────────────────────
+
+async def upsert_user_match(demo_id: str, **kwargs) -> None:
+    """Insert or replace a user match record. kwargs must match column names."""
+    pool = await get_pool()
+    cols   = ['demo_id'] + list(kwargs.keys())
+    params = [demo_id]   + list(kwargs.values())
+    placeholders = ', '.join(f'${i+1}' for i in range(len(params)))
+    col_list     = ', '.join(cols)
+    updates      = ', '.join(
+        f"{c} = EXCLUDED.{c}" for c in kwargs if c != 'processed_at'
+    )
+    await pool.execute(
+        f"""
+        INSERT INTO user_matches ({col_list}) VALUES ({placeholders})
+        ON CONFLICT (demo_id) DO UPDATE SET {updates}
+        """,
+        *params,
+    )
+
+
+async def get_user_matches(steam_id: str, limit: int = 30) -> list[dict]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT demo_id, map_name, match_date, score_ct, score_t,
+               user_side_first, user_result, kills, deaths, assists,
+               hs_pct, round_count
+        FROM user_matches
+        WHERE steam_id = $1
+        ORDER BY match_date DESC NULLS LAST, processed_at DESC
+        LIMIT $2
+        """,
+        steam_id, limit,
+    )
+    return [dict(r) for r in rows]
+
+
+async def get_match_parquet_dir(demo_id: str) -> tuple[str, str] | None:
+    """Return (parquet_dir, map_name) for either a user or pro match."""
+    pool = await get_pool()
+    row  = await pool.fetchrow(
+        "SELECT parquet_dir, map_name FROM user_matches WHERE demo_id = $1",
+        demo_id,
+    )
+    if row and row['parquet_dir']:
+        return row['parquet_dir'], row['map_name']
+    row = await pool.fetchrow(
+        "SELECT parquet_dir, map_name FROM pro_matches WHERE match_id = $1",
+        demo_id,
+    )
+    if row and row['parquet_dir']:
+        return row['parquet_dir'], row['map_name']
+    return None
+
+
+async def get_match_source_record(match_id: str) -> dict | None:
+    """Return a normalized match record for either a user or pro match."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT *, demo_id AS source_match_id, 'user' AS source_type "
+        "FROM user_matches WHERE demo_id = $1",
+        match_id,
+    )
+    if row:
+        return dict(row)
+
+    row = await pool.fetchrow(
+        "SELECT *, match_id AS source_match_id, 'pro' AS source_type "
+        "FROM pro_matches WHERE match_id = $1",
+        match_id,
+    )
     return dict(row) if row else None
 
 
-def get_all_users(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute(
-        "SELECT * FROM users WHERE match_auth_code IS NOT NULL"
-    ).fetchall()
+# ── Pro matches ────────────────────────────────────────────────────────────────
+
+async def upsert_pro_match(match_id: str, **kwargs) -> None:
+    """Insert or replace a pro match record. kwargs must match column names."""
+    pool = await get_pool()
+    cols   = ['match_id'] + list(kwargs.keys())
+    params = [match_id]   + list(kwargs.values())
+    placeholders = ', '.join(f'${i+1}' for i in range(len(params)))
+    col_list     = ', '.join(cols)
+    updates      = ', '.join(
+        f"{c} = EXCLUDED.{c}" for c in kwargs if c != 'ingested_at'
+    )
+    await pool.execute(
+        f"""
+        INSERT INTO pro_matches ({col_list}) VALUES ({placeholders})
+        ON CONFLICT (match_id) DO UPDATE SET {updates}
+        """,
+        *params,
+    )
+
+
+async def get_ingested_pro_match_ids() -> set[str]:
+    """Return all match_ids already in pro_matches (for idempotency)."""
+    pool = await get_pool()
+    rows = await pool.fetch("SELECT match_id FROM pro_matches")
+    return {r['match_id'] for r in rows}
+
+
+async def get_pro_matches(limit: int | None = None) -> list[dict]:
+    pool = await get_pool()
+    query = (
+        "SELECT match_id, map_name, parquet_dir, match_date, event_name, "
+        "       hltv_url, team_ct, team_t, ingested_at "
+        "FROM pro_matches "
+        "ORDER BY ingested_at DESC"
+    )
+    params: tuple = ()
+    if limit is not None:
+        query += " LIMIT $1"
+        params = (limit,)
+    rows = await pool.fetch(query, *params)
     return [dict(r) for r in rows]
+
+
+# ── Event windows ──────────────────────────────────────────────────────────────
+
+async def upsert_event_window(window_id: str, **kwargs) -> None:
+    """Insert or replace an event-window record. kwargs must match column names."""
+    pool = await get_pool()
+    cols = ['window_id'] + list(kwargs.keys())
+    params = [window_id] + list(kwargs.values())
+    placeholders = ', '.join(f'${i+1}' for i in range(len(params)))
+    col_list = ', '.join(cols)
+    updates = ', '.join(
+        f"{c} = EXCLUDED.{c}" for c in kwargs if c != 'created_at'
+    )
+    await pool.execute(
+        f"""
+        INSERT INTO event_windows ({col_list}) VALUES ({placeholders})
+        ON CONFLICT (window_id) DO UPDATE SET {updates}
+        """,
+        *params,
+    )
+
+
+async def get_event_window(window_id: str) -> dict | None:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT * FROM event_windows WHERE window_id = $1",
+        window_id,
+    )
+    return dict(row) if row else None
+
+
+async def list_event_window_candidates(
+    *,
+    source_type: str = "pro",
+    map_name: str | None = None,
+    phase: str | None = None,
+    side_to_query: str | None = None,
+    feature_version: str | None = None,
+    limit: int = 250,
+) -> list[dict]:
+    pool = await get_pool()
+
+    filters = ["source_type = $1"]
+    params: list = [source_type]
+
+    if map_name is not None:
+        params.append(map_name)
+        filters.append(f"map_name = ${len(params)}")
+    if phase is not None:
+        params.append(phase)
+        filters.append(f"phase = ${len(params)}")
+    if side_to_query is not None:
+        params.append(side_to_query)
+        filters.append(f"(side_to_query = ${len(params)} OR side_to_query IS NULL)")
+    if feature_version is not None:
+        params.append(feature_version)
+        filters.append(f"feature_version = ${len(params)}")
+
+    params.append(limit)
+    query = (
+        "SELECT * FROM event_windows "
+        f"WHERE {' AND '.join(filters)} "
+        "ORDER BY created_at DESC "
+        f"LIMIT ${len(params)}"
+    )
+    rows = await pool.fetch(query, *params)
+    return [dict(r) for r in rows]
+
+
+# ── Job runs ───────────────────────────────────────────────────────────────────
+
+async def start_job_run(job_name: str) -> int:
+    pool = await get_pool()
+    row  = await pool.fetchrow(
+        "INSERT INTO job_runs (job_name, started_at, status) "
+        "VALUES ($1, NOW(), 'running') RETURNING id",
+        job_name,
+    )
+    return row['id']
+
+
+async def finish_job_run(
+    run_id: int,
+    status: str,
+    items_processed: int | None = None,
+    error_message: str | None = None,
+    stats: dict | None = None,
+) -> None:
+    import json
+    pool = await get_pool()
+    await pool.execute(
+        """
+        UPDATE job_runs
+        SET finished_at = NOW(), status = $2,
+            items_processed = $3, error_message = $4, stats_json = $5
+        WHERE id = $1
+        """,
+        run_id, status, items_processed, error_message,
+        json.dumps(stats) if stats else None,
+    )
