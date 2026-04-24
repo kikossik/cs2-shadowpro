@@ -314,6 +314,17 @@ async def link_game_team(
     )
 
 
+def _sha256_file(path: str) -> str | None:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            while chunk := fh.read(65536):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
 async def upsert_game_artifact(
     *,
     game_id: str,
@@ -324,6 +335,8 @@ async def upsert_game_artifact(
 ) -> None:
     pool = await get_pool()
     managed = config.to_managed_path(path)
+    if content_hash is None:
+        content_hash = _sha256_file(path)
     await pool.execute(
         """
         INSERT INTO game_artifacts (game_id, kind, version, path, content_hash, updated_at)
@@ -449,8 +462,21 @@ async def upsert_pro_game(
         ingest_error=None,
         ingested_at=datetime.now(timezone.utc),
     )
-    await link_game_team(game_id=game_id, team_id=team1_id, source_team_slot=1)
-    await link_game_team(game_id=game_id, team_id=team2_id, source_team_slot=2)
+    ct_wins = ct_round_wins or 0
+    t_wins = t_round_wins or 0
+    total = ct_wins + t_wins
+    await link_game_team(
+        game_id=game_id, team_id=team1_id, source_team_slot=1,
+        side_first="ct",
+        score=ct_round_wins,
+        won=(ct_wins > t_wins) if total > 0 else None,
+    )
+    await link_game_team(
+        game_id=game_id, team_id=team2_id, source_team_slot=2,
+        side_first="t",
+        score=t_round_wins,
+        won=(t_wins > ct_wins) if total > 0 else None,
+    )
 
     if artifact_path and artifact_version:
         await upsert_game_artifact(

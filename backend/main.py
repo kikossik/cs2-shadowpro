@@ -19,6 +19,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
 from backend import config, db
+from backend.log import get_logger
+
+log = get_logger("API")
 
 app = FastAPI(title="CS2 ShadowPro")
 
@@ -174,8 +177,13 @@ async def setup_user(
             r = process_share_code(steam_id, last_share_code)
             results.append(r)
         except Exception as exc:
+            log.error("setup share-code processing failed for %s: %s", steam_id, exc, exc_info=True)
             results.append({"error": str(exc)})
-        sync_result = sync_user(steam_id)
+        try:
+            sync_result = sync_user(steam_id)
+        except Exception as exc:
+            log.error("sync failed for %s: %s", steam_id, exc, exc_info=True)
+            sync_result = {"new_matches": 0, "errors": [str(exc)]}
         results.append(sync_result)
         new_matches = sum(1 for r in results if "demo_id" in r)
         new_matches += sync_result.get("new_matches", 0)
@@ -226,6 +234,7 @@ async def import_demo(
             result = process_demo(dest, steam_id, safe_name, match_type=match_type)
             _jobs[job_id].update({"status": "done", **result})
         except Exception as exc:
+            log.error("import failed for %s: %s", safe_name, exc, exc_info=True)
             _jobs[job_id].update({"status": "error", "error": str(exc)})
 
     background_tasks.add_task(_executor.submit, _run)
