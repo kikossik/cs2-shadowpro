@@ -271,6 +271,29 @@ CREATE INDEX IF NOT EXISTS idx_round_analysis_lookup
 CREATE INDEX IF NOT EXISTS idx_round_analysis_versions
     ON round_analysis_results (logic, matcher_version, pro_corpus_version, updated_at DESC);
 
+-- ── Demo import job queue ─────────────────────────────────────────────────────
+--
+--   Web process writes 'pending' rows; worker claims them with
+--   SELECT FOR UPDATE SKIP LOCKED so multiple workers never double-process.
+--
+CREATE TABLE IF NOT EXISTS demo_jobs (
+    job_id     TEXT PRIMARY KEY,
+    steam_id   TEXT        NOT NULL REFERENCES users (steam_id) ON DELETE CASCADE,
+    demo_path  TEXT        NOT NULL,
+    demo_id    TEXT        NOT NULL,
+    match_type TEXT        NOT NULL DEFAULT 'unknown',
+    status     TEXT        NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'done', 'error')),
+    result_json JSONB,
+    error      TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_demo_jobs_pending ON demo_jobs (status, created_at ASC)
+    WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_demo_jobs_steam ON demo_jobs (steam_id, created_at DESC);
+
 -- ── Job runs ──────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS job_runs (
     id              BIGSERIAL PRIMARY KEY,

@@ -874,7 +874,7 @@ def build_match_artifact(
     for anchor in anchors:
         anchors_by_round.setdefault(int(anchor["round_num"]), []).append(anchor)
 
-    artifact_dir = derived_match_dir(source_type, source_match_id)
+    artifact_dir = derived_match_dir(source_type, source_match_id, steam_id=steam_id)
     rounds_data: dict[str, dict] = {}
 
     for round_row in rounds.iter_rows(named=True):

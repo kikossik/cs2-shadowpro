@@ -211,13 +211,14 @@ async def trigger_sync(steam_id: str, background_tasks: BackgroundTasks):
 
 @app.post("/api/import")
 async def import_demo(
-    background_tasks: BackgroundTasks,
-    steam_id: str    = Form(...),
-    match_type: str  = Form("unknown"),
-    file: UploadFile = File(...),
+    steam_id:   str        = Form(...),
+    match_type: str        = Form("unknown"),
+    file:       UploadFile = File(...),
 ):
     if not file.filename or not file.filename.endswith(".dem"):
         raise HTTPException(status_code=400, detail="Only .dem files are accepted.")
+
+    await db.upsert_user(steam_id)
 
     job_id    = str(uuid.uuid4())
     safe_name = f"{int(time.time())}_{file.filename}"
@@ -226,27 +227,30 @@ async def import_demo(
     with dest.open("wb") as fh:
         shutil.copyfileobj(file.file, fh)
 
-    _jobs[job_id] = {"status": "processing", "demo_id": safe_name, "steam_id": steam_id}
-
-    def _run() -> None:
-        try:
-            from backend.processing import process_demo
-            result = process_demo(dest, steam_id, safe_name, match_type=match_type)
-            _jobs[job_id].update({"status": "done", **result})
-        except Exception as exc:
-            log.error("import failed for %s: %s", safe_name, exc, exc_info=True)
-            _jobs[job_id].update({"status": "error", "error": str(exc)})
-
-    background_tasks.add_task(_executor.submit, _run)
+    await db.create_demo_job(
+        job_id=job_id,
+        steam_id=steam_id,
+        demo_path=str(dest),
+        demo_id=safe_name,
+        match_type=match_type or "unknown",
+    )
     return {"job_id": job_id, "demo_id": safe_name}
 
 
 @app.get("/api/import/{job_id}")
-def import_status(job_id: str):
-    job = _jobs.get(job_id)
+async def import_status(job_id: str):
+    job = await db.get_demo_job(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Unknown job ID")
-    return JSONResponse(job)
+    payload: dict = {
+        "status":   job["status"],
+        "demo_id":  job["demo_id"],
+        "steam_id": job["steam_id"],
+        "error":    job.get("error"),
+    }
+    if job.get("result_json"):
+        payload.update(job["result_json"])
+    return JSONResponse(payload)
 
 
 # ── Round replay ───────────────────────────────────────────────────────────────

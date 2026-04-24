@@ -992,6 +992,75 @@ async def upsert_round_analysis_result(
     )
 
 
+# ── Demo import job queue ─────────────────────────────────────────────────────
+
+async def create_demo_job(
+    *,
+    job_id: str,
+    steam_id: str,
+    demo_path: str,
+    demo_id: str,
+    match_type: str,
+) -> None:
+    pool = await get_pool()
+    await pool.execute(
+        """
+        INSERT INTO demo_jobs (job_id, steam_id, demo_path, demo_id, match_type)
+        VALUES ($1, $2, $3, $4, $5)
+        """,
+        job_id, steam_id, demo_path, demo_id, match_type,
+    )
+
+
+async def claim_demo_job() -> dict | None:
+    """Atomically claim one pending job. Returns the claimed row or None."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE demo_jobs
+        SET status = 'processing', updated_at = NOW()
+        WHERE job_id = (
+            SELECT job_id FROM demo_jobs
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *
+        """
+    )
+    return dict(row) if row else None
+
+
+async def finish_demo_job(
+    job_id: str,
+    *,
+    result: dict | None = None,
+    error: str | None = None,
+) -> None:
+    pool = await get_pool()
+    status = "error" if error else "done"
+    await pool.execute(
+        """
+        UPDATE demo_jobs
+        SET status = $2, result_json = $3, error = $4, updated_at = NOW()
+        WHERE job_id = $1
+        """,
+        job_id,
+        status,
+        json.dumps(result) if result is not None else None,
+        error,
+    )
+
+
+async def get_demo_job(job_id: str) -> dict | None:
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT * FROM demo_jobs WHERE job_id = $1", job_id
+    )
+    return dict(row) if row else None
+
+
 # ── Job runs ───────────────────────────────────────────────────────────────────
 
 async def start_job_run(job_name: str) -> int:
