@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
 
 import asyncpg
 import polars as pl
@@ -156,10 +157,6 @@ def _round_fact_rows(rounds_df: pl.DataFrame) -> list[dict]:
     return rows
 
 
-def _delete_parquets(parquet_dir: Path, demo_id: str) -> None:
-    for field in _PARQUET_FIELDS:
-        (parquet_dir / f"{demo_id}_{field}.parquet").unlink(missing_ok=True)
-
 
 def _write_parquets(dem: Demo, parquet_dir: Path, demo_id: str) -> None:
     parquet_dir.mkdir(parents=True, exist_ok=True)
@@ -242,7 +239,7 @@ def process_demo(
     dem = Demo(path=str(demo_path))
     dem.parse(player_props=PLAYER_PROPS)
 
-    parquet_dir = config.PARQUET_USER_DIR
+    parquet_dir = config.PARQUET_USER_DIR / steam_id / demo_id
     _write_parquets(dem, parquet_dir, demo_id)
 
     map_name = _map_name(dem)
@@ -298,10 +295,11 @@ def process_demo(
             parquet_dir=parquet_dir,
             stem=demo_id,
             map_name=map_name,
+            steam_id=steam_id,
         )
         asyncio.run(_save_match(demo_id, player_kwargs, game_kwargs, round_rows, windows))
     except Exception:
-        _delete_parquets(parquet_dir, demo_id)
+        shutil.rmtree(parquet_dir, ignore_errors=True)
         raise
 
     return {

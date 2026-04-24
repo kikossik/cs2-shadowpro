@@ -51,8 +51,8 @@ def load_match_frames(parquet_dir: Path, stem: str) -> dict[str, pl.DataFrame]:
     }
 
 
-def _feature_dir(source_type: str, source_match_id: str) -> Path:
-    feature_dir = derived_match_dir(source_type, source_match_id) / "window_features"
+def _feature_dir(source_type: str, source_match_id: str, steam_id: str | None = None) -> Path:
+    feature_dir = derived_match_dir(source_type, source_match_id, steam_id=steam_id) / "window_features"
     feature_dir.mkdir(parents=True, exist_ok=True)
     return feature_dir
 
@@ -266,7 +266,7 @@ def extract_match_event_windows(
     if rounds.height == 0:
         return []
 
-    feature_dir = _feature_dir(source_type, source_match_id)
+    feature_dir = _feature_dir(source_type, source_match_id, steam_id=steam_id)
     anchors = list_match_anchor_specs(
         frames=frames,
         pre_ticks=pre_ticks,

@@ -73,9 +73,17 @@ def to_managed_path(local_path: str | Path) -> str:
     return raw
 
 
-def derived_match_dir(source_type: str, source_match_id: str) -> Path:
-    """Return the writable local directory for derived match outputs."""
-    root = DERIVED_PRO_DIR if source_type == "pro" else DERIVED_USER_DIR
-    match_dir = root / source_match_id
+def derived_match_dir(source_type: str, source_match_id: str, steam_id: str | None = None) -> Path:
+    """Return the writable local directory for derived match outputs.
+
+    User matches: derived_user/{steam_id}/{source_match_id}/
+    Pro matches:  derived_pro/{source_match_id}/
+    """
+    if source_type == "pro":
+        match_dir = DERIVED_PRO_DIR / source_match_id
+    elif steam_id:
+        match_dir = DERIVED_USER_DIR / steam_id / source_match_id
+    else:
+        match_dir = DERIVED_USER_DIR / source_match_id
     match_dir.mkdir(parents=True, exist_ok=True)
     return match_dir
