@@ -11,6 +11,10 @@ from pathlib import Path
 
 import rarfile
 
+from backend.log import get_logger
+
+log = get_logger("DECOMPRESS")
+
 KNOWN_MAPS = ("mirage", "dust2", "inferno", "nuke", "anubis", "ancient", "overpass")
 
 
@@ -39,7 +43,7 @@ def extract_all_dems(archive: Path, dst_dir: Path) -> list[Path]:
             dst = dst_dir / f"{stem}_{tag}.dem"
 
             if dst.exists():
-                print(f"[decompress] SKIP (exists): {dst.name}")
+                log.info("SKIP (exists): %s", dst.name)
                 extracted.append(dst)
                 continue
 
@@ -53,7 +57,7 @@ def extract_all_dems(archive: Path, dst_dir: Path) -> list[Path]:
             dst_part.rename(dst)
             elapsed = int(time.monotonic() - start)
             size_mb = dst.stat().st_size / 1_048_576
-            print(f"[decompress] → {dst.name} ({size_mb:.0f} MB, {elapsed}s) [from: {member}]")
+            log.info("-> %s (%.0f MB, %ds) [from: %s]", dst.name, size_mb, elapsed, member)
             extracted.append(dst)
 
     return extracted

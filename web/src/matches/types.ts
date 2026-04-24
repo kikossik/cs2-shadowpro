@@ -1,5 +1,6 @@
 export type MatchResult = "win" | "loss" | "draw";
 export type MatchSide = "ct" | "t";
+export type MatchType = "unknown" | "premier" | "competitive" | "faceit" | "hltv";
 
 export type MatchRound = {
   side: MatchSide;
@@ -26,6 +27,7 @@ export type Match = {
   map: MapInfo;
   /** Unix timestamp (seconds) from the server. */
   date: number;
+  match_type: MatchType;
   result: MatchResult | null;
   user_side_first: MatchSide | null;
   score: { ct: number; t: number } | null;
@@ -51,4 +53,3 @@ export type MatchesTweakState = {
   showRoundStrip: boolean;
   skeleton: boolean;
 };
-

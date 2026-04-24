@@ -308,6 +308,7 @@ def extract_match_event_windows(
 
         windows.append({
             "window_id": window_id,
+            "game_id": source_match_id,
             "source_type": source_type,
             "source_match_id": source_match_id,
             "steam_id": steam_id,

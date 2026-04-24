@@ -751,7 +751,7 @@ export function Viewer({
               <div className="why-note-tag" style={{ color: theme.dim, fontFamily: theme.fontMono }}>PRO MATCH</div>
               <div style={{ display: "grid", gap: 6, fontFamily: theme.fontMono, fontSize: 11 }}>
                 <div style={{ color: theme.ink }}>
-                  {bestMatch.team_ct ?? "CT"} vs {bestMatch.team_t ?? "T"}
+                  {bestMatch.team1_name ?? bestMatch.team_ct ?? "Team 1"} vs {bestMatch.team2_name ?? bestMatch.team_t ?? "Team 2"}
                 </div>
                 <div style={{ color: theme.dim }}>
                   {bestMatch.event_name ?? "HLTV corpus"} · round {bestMatch.round_num}
@@ -823,7 +823,7 @@ export function Viewer({
                         #{candidate.shortlist_rank} · {candidate.event_name ?? candidate.map.display}
                       </div>
                       <div style={{ color: theme.dim, fontFamily: theme.fontMono, fontSize: 10 }}>
-                        round {candidate.round_num} · {candidate.team_ct ?? "CT"} vs {candidate.team_t ?? "T"}
+                        round {candidate.round_num} · {candidate.team1_name ?? candidate.team_ct ?? "Team 1"} vs {candidate.team2_name ?? candidate.team_t ?? "Team 2"}
                       </div>
                     </div>
                     <div style={{ color: theme.ink, fontFamily: theme.fontMono, fontSize: 11 }}>

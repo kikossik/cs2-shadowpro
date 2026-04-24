@@ -1,6 +1,6 @@
 import type { Match } from "./types";
 import { MapThumb, RoundStrip } from "./Shell";
-import { fmtFullDate, fmtTime } from "./utils";
+import { fmtFullDate, fmtTime, matchTypeLabel } from "./utils";
 
 const EMPTY_ASCII = `
   ┌─────────────┐
@@ -69,7 +69,7 @@ function LedgerRow({ m, showRoundStrip, onOpen, onOpenReplay }: LedgerRowProps) 
       <div className="map-info">
         <div className="map-name">{m.map.display}</div>
         <div className="map-sub">
-          COMPETITIVE · {fmtFullDate(m.date)} {fmtTime(m.date)}
+          {matchTypeLabel(m.match_type)} · {fmtFullDate(m.date)} {fmtTime(m.date)}
         </div>
       </div>
       <div className="score-cell">

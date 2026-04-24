@@ -1,6 +1,6 @@
 import type { Match } from "./types";
 import { MapThumb, RoundStrip } from "./Shell";
-import { fmtFullDate, fmtTime } from "./utils";
+import { fmtFullDate, fmtTime, matchTypeLabel } from "./utils";
 
 const EMPTY_ASCII = `
   ┌─────────────┐
@@ -52,7 +52,7 @@ function MatchCard({ m, onOpen, showRoundStrip }: MatchCardProps) {
         <div className="card-top-info">
           <div className="card-map-name">{m.map.display}</div>
           <div className="card-sub">
-            COMPETITIVE · {fmtFullDate(m.date)} · {fmtTime(m.date)}
+            {matchTypeLabel(m.match_type)} · {fmtFullDate(m.date)} · {fmtTime(m.date)}
           </div>
           {m.user_side_first && (
             <div className="card-sub" style={{ color: "var(--dimmer)" }}>

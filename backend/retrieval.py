@@ -743,6 +743,8 @@ async def get_best_pro_mapping(
                 **best,
                 "map_name": best_match_record.get("map_name") if best_match_record else None,
                 "event_name": best_match_record.get("event_name") if best_match_record else None,
+                "team1_name": best_match_record.get("team1_name") if best_match_record else None,
+                "team2_name": best_match_record.get("team2_name") if best_match_record else None,
                 "team_ct": best_match_record.get("team_ct") if best_match_record else None,
                 "team_t": best_match_record.get("team_t") if best_match_record else None,
                 "match_date": (

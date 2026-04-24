@@ -13,7 +13,8 @@ import polars as pl
 from awpy import Demo
 
 from backend import config, db
-from pipeline.steps.build_artifact import build_match_artifact
+from pipeline.features.featurize_windows import FEATURE_VERSION, TICK_RATE
+from pipeline.steps.build_artifact import ARTIFACT_VERSION, build_match_artifact
 
 PLAYER_PROPS = [
     'balance', 'armor_value', 'has_defuser', 'flash_duration',
@@ -114,6 +115,44 @@ def _match_stats(dem: Demo, steam_id: str) -> dict:
 _PARQUET_FIELDS = (
     "ticks", "rounds", "shots", "smokes", "infernos", "flashes", "grenade_paths",
 )
+_MATCH_TYPES = {"unknown", "premier", "competitive", "faceit"}
+
+
+def _safe_int(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _round_fact_rows(rounds_df: pl.DataFrame) -> list[dict]:
+    rows: list[dict] = []
+    for row in rounds_df.iter_rows(named=True):
+        start_tick = _safe_int(row.get("start"))
+        freeze_end_tick = _safe_int(row.get("freeze_end"))
+        end_tick = _safe_int(row.get("end"))
+        official_end_tick = _safe_int(row.get("official_end")) or end_tick
+        origin_tick = freeze_end_tick if freeze_end_tick is not None else start_tick
+        duration_ticks = (
+            official_end_tick - origin_tick
+            if official_end_tick is not None and origin_tick is not None
+            else None
+        )
+        rows.append({
+            "round_num": _safe_int(row.get("round_num")),
+            "start_tick": start_tick,
+            "freeze_end_tick": freeze_end_tick,
+            "end_tick": end_tick,
+            "official_end_tick": official_end_tick,
+            "winner_side": row.get("winner"),
+            "reason": row.get("reason"),
+            "bomb_plant_tick": _safe_int(row.get("bomb_plant")),
+            "bomb_site": row.get("bomb_site"),
+            "duration_ticks": duration_ticks,
+        })
+    return rows
 
 
 def _delete_parquets(parquet_dir: Path, demo_id: str) -> None:
@@ -167,12 +206,24 @@ def _write_parquets(dem: Demo, parquet_dir: Path, demo_id: str) -> None:
     _w(flashes, "flashes")
 
 
-async def _save_match(demo_id: str, kwargs: dict) -> None:
+async def _save_match(demo_id: str, kwargs: dict, game_kwargs: dict, round_rows: list[dict]) -> None:
     await db.upsert_user_match(demo_id, **kwargs)
+    await db.upsert_user_game(game_id=demo_id, **game_kwargs)
+    await db.upsert_rounds(demo_id, round_rows)
 
 
-def process_demo(demo_path: Path, steam_id: str, demo_id: str, share_code: str | None = None) -> dict:
+def process_demo(
+    demo_path: Path,
+    steam_id: str,
+    demo_id: str,
+    share_code: str | None = None,
+    match_type: str = "unknown",
+) -> dict:
     """Parse a demo, write Parquet files, build artifact, upsert user_matches row."""
+    match_type = (match_type or "unknown").strip().lower()
+    if match_type not in _MATCH_TYPES:
+        match_type = "unknown"
+
     dem = Demo(path=str(demo_path))
     dem.parse(player_props=PLAYER_PROPS)
 
@@ -182,6 +233,8 @@ def process_demo(demo_path: Path, steam_id: str, demo_id: str, share_code: str |
     map_name = _map_name(dem)
     match_date = datetime.fromtimestamp(demo_path.stat().st_mtime, tz=timezone.utc)
     stats = _match_stats(dem, steam_id)
+    rounds = dem.rounds if dem.rounds is not None else pl.DataFrame()
+    round_rows = _round_fact_rows(rounds) if rounds.height > 0 else []
 
     try:
         artifact_path = build_match_artifact(
@@ -195,6 +248,7 @@ def process_demo(demo_path: Path, steam_id: str, demo_id: str, share_code: str |
         db_kwargs = {
             "steam_id":        steam_id,
             "map_name":        map_name,
+            "match_type":      match_type or "unknown",
             "match_date":      match_date,
             "parquet_dir":     str(parquet_dir),
             "artifact_path":   artifact_path,
@@ -204,7 +258,20 @@ def process_demo(demo_path: Path, steam_id: str, demo_id: str, share_code: str |
                 "kills", "deaths", "assists", "hs_pct", "round_count",
             )},
         }
-        asyncio.run(_save_match(demo_id, db_kwargs))
+        game_kwargs = {
+            "steam_id":                 steam_id,
+            "map_name":                 map_name,
+            "match_type":               match_type or "unknown",
+            "share_code":               share_code,
+            "match_date":               match_date,
+            "parquet_dir":              str(parquet_dir),
+            "artifact_path":            artifact_path,
+            "round_count":              stats.get("round_count"),
+            "tick_rate":                TICK_RATE,
+            "artifact_version":         ARTIFACT_VERSION,
+            "window_feature_version":   FEATURE_VERSION,
+        }
+        asyncio.run(_save_match(demo_id, db_kwargs, game_kwargs, round_rows))
     except Exception:
         _delete_parquets(parquet_dir, demo_id)
         raise

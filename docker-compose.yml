@@ -106,6 +106,7 @@ services:
     environment:
       DATABASE_URL: postgresql://cs2shadowpro:cs2shadowpro@db/cs2shadowpro
       PRO_SCRAPER_INTERVAL_SECONDS: "86400"
+      PRO_SCRAPER_LIMIT: "2"
       PLAYWRIGHT_HEADLESS: "0"
     volumes:
       - ./demos_pro:/app/demos_pro

@@ -14,6 +14,9 @@ import traceback
 from pathlib import Path
 
 from backend import config, db
+from backend.log import get_logger
+
+log = get_logger("REFRESH")
 from pipeline.steps.decompress import KNOWN_MAPS, extract_all_dems
 from pipeline.steps.download import download_archive
 from pipeline.steps.ingest import ingest_pro_demo
@@ -50,20 +53,19 @@ async def refresh_pro_corpus(limit: int = 50, results_url: str | None = None) ->
                 summary["skipped"] += 1
                 continue
 
-            prefix = f"{match['match_id']}_"
-            if any(done_id.startswith(prefix) for done_id in done_ids):
-                summary["skipped"] += 1
-                continue
-
             summary["attempted"] += 1
             archive: Path | None = None
             try:
                 archive = await download_archive(match, config.DEMOS_PRO_DIR)
                 dems = extract_all_dems(archive, config.DEMOS_PRO_DIR / "decompressed")
 
-                for dem in dems:
+                for map_number, dem in enumerate(dems, start=1):
                     map_tag = dem.stem.rsplit("_", 1)[-1]
                     if map_tag not in KNOWN_MAPS:
+                        dem.unlink(missing_ok=True)
+                        continue
+                    if dem.stem in done_ids:
+                        summary["skipped"] += 1
                         dem.unlink(missing_ok=True)
                         continue
 
@@ -71,26 +73,29 @@ async def refresh_pro_corpus(limit: int = 50, results_url: str | None = None) ->
                         await ingest_pro_demo(
                             dem,
                             dem.stem,
+                            hltv_match_id=match.get("match_id"),
                             hltv_url=match.get("match_url"),
+                            source_slug=match.get("slug"),
                             event_name=match.get("event_name"),
-                            team_ct=match.get("team1"),
-                            team_t=match.get("team2"),
+                            team1_name=match.get("team1"),
+                            team2_name=match.get("team2"),
                             match_date=match.get("match_date"),
+                            map_number=map_number,
                         )
                         done_ids.add(dem.stem)
                         summary["maps_ingested"] += 1
                         dem.unlink(missing_ok=True)
-                        print(f"[refresh] ingested: {dem.name}")
+                        log.info("ingested: %s", dem.name)
                     except Exception as exc:
                         summary["errors"].append({"dem": dem.name, "error": str(exc)})
-                        print(f"[refresh] INGEST ERROR {dem.name}: {exc}")
+                        log.error("INGEST ERROR %s: %s", dem.name, exc)
                         traceback.print_exc()
 
                 summary["succeeded"] += 1
 
             except Exception as exc:
                 summary["errors"].append({"match_id": match.get("match_id"), "error": str(exc)})
-                print(f"[refresh] MATCH ERROR {match.get('match_id')}: {exc}")
+                log.error("MATCH ERROR %s: %s", match.get("match_id"), exc)
                 traceback.print_exc()
             finally:
                 if archive is not None:
@@ -108,7 +113,10 @@ async def refresh_pro_corpus(limit: int = 50, results_url: str | None = None) ->
         error_message=error_message,
         stats={key: value for key, value in summary.items() if key != "errors"},
     )
-    print(f"[refresh] done: {summary}")
+    log.info(
+        "done: scraped=%d skipped=%d maps_ingested=%d errors=%d",
+        summary["scraped"], summary["skipped"], summary["maps_ingested"], len(summary["errors"]),
+    )
     return summary
 
 

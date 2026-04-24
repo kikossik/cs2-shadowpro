@@ -6,20 +6,15 @@ Run:
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 
 import asyncpg
 
 from backend import config
+from backend.log import get_logger
 from backend.sync import sync_user
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [worker] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-)
-log = logging.getLogger(__name__)
+log = get_logger("WORKER")
 
 
 async def _get_syncable_users() -> list[str]:

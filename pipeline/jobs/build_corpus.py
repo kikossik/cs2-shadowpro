@@ -11,7 +11,10 @@ import json
 from pathlib import Path
 
 from backend import db
+from backend.log import get_logger
 from pipeline.features.extract_windows import extract_match_event_windows
+
+log = get_logger("CORPUS")
 from pipeline.features.featurize_windows import FEATURE_VERSION
 from pipeline.steps.build_artifact import ARTIFACT_VERSION, build_match_artifact
 
@@ -86,10 +89,10 @@ async def build_corpus(limit: int | None = None, force: bool = False) -> dict:
                     await db.upsert_event_window(window_id, **window)
 
                 processed += 1
-                print(f"[build-corpus] {match_id} -> {ARTIFACT_VERSION}, {len(windows)} windows")
+                log.info("%s -> %s, %d windows", match_id, ARTIFACT_VERSION, len(windows))
             except Exception as exc:
                 errors.append({"match_id": match_id, "error": str(exc)})
-                print(f"[build-corpus] ERROR {match_id}: {exc}")
+                log.error("%s: %s", match_id, exc)
 
     except Exception as exc:
         status = "error"
@@ -122,7 +125,7 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Rebuild even if artifact already exists")
     args = parser.parse_args()
     summary = asyncio.run(build_corpus(limit=args.limit, force=args.force))
-    print(f"[build-corpus] done: {summary}")
+    log.info("done: processed=%d skipped=%d errors=%d", summary["processed"], summary["skipped"], len(summary["errors"]))
 
 
 if __name__ == "__main__":

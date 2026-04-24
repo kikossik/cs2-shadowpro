@@ -6,19 +6,13 @@ Run:
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
 
+from backend.log import get_logger
 from pipeline.jobs.refresh_pro_corpus import refresh_pro_corpus
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [pro-scraper] %(levelname)s %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%S",
-    force=True,
-)
-log = logging.getLogger(__name__)
+log = get_logger("SCRAPER")
 
 
 def _interval_seconds() -> int:

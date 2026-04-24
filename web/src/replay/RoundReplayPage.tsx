@@ -442,7 +442,7 @@ export function RoundReplayPage({ demoId, initialRound, onBack }: Props) {
             {bestMatch && (
               <div style={styles.proMeta}>
                 <div style={styles.proMetaTitle}>
-                  {bestMatch.team_ct ?? "CT"} vs {bestMatch.team_t ?? "T"}
+                  {bestMatch.team1_name ?? bestMatch.team_ct ?? "Team 1"} vs {bestMatch.team2_name ?? bestMatch.team_t ?? "Team 2"}
                 </div>
                 <div style={styles.proMetaSub}>
                   {bestMatch.event_name ?? "HLTV corpus"} · round {bestMatch.round_num}

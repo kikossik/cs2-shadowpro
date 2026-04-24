@@ -1,4 +1,4 @@
-import type { Match, MatchResult } from "./types";
+import type { Match, MatchResult, MatchType } from "./types";
 
 export const MAP_OPTIONS = [
   "All maps", "Mirage", "Inferno", "Dust II", "Ancient", "Nuke", "Anubis",
@@ -43,4 +43,19 @@ export function fmtTime(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString("en-US", {
     hour: "2-digit", minute: "2-digit", hour12: false,
   });
+}
+
+export function matchTypeLabel(matchType: MatchType | string | null | undefined): string {
+  switch (matchType) {
+    case "premier":
+      return "PREMIER";
+    case "competitive":
+      return "COMPETITIVE";
+    case "faceit":
+      return "FACEIT";
+    case "hltv":
+      return "HLTV";
+    default:
+      return "MATCH";
+  }
 }

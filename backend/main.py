@@ -137,6 +137,7 @@ async def get_matches(steam_id: str):
         result.append({
             "id":              r["demo_id"],
             "map":             _map_display(r["map_name"]),
+            "match_type":      r.get("match_type") or "unknown",
             "date":            int(r["match_date"].timestamp()) if r["match_date"] else None,
             "result":          r["user_result"],
             "user_side_first": r["user_side_first"],
@@ -204,6 +205,7 @@ async def trigger_sync(steam_id: str, background_tasks: BackgroundTasks):
 async def import_demo(
     background_tasks: BackgroundTasks,
     steam_id: str    = Form(...),
+    match_type: str  = Form("unknown"),
     file: UploadFile = File(...),
 ):
     if not file.filename or not file.filename.endswith(".dem"):
@@ -221,7 +223,7 @@ async def import_demo(
     def _run() -> None:
         try:
             from backend.processing import process_demo
-            result = process_demo(dest, steam_id, safe_name)
+            result = process_demo(dest, steam_id, safe_name, match_type=match_type)
             _jobs[job_id].update({"status": "done", **result})
         except Exception as exc:
             _jobs[job_id].update({"status": "error", "error": str(exc)})
@@ -497,6 +499,8 @@ def _build_round_analysis_payload(
             "score":                  selected_match["deep_score"],
             "map_name":               selected_match.get("map_name"),
             "event_name":             selected_match.get("event_name"),
+            "team1_name":              selected_match.get("team1_name"),
+            "team2_name":              selected_match.get("team2_name"),
             "team_ct":                selected_match.get("team_ct"),
             "team_t":                 selected_match.get("team_t"),
             "match_date":             selected_match.get("match_date"),
@@ -569,6 +573,8 @@ async def _compute_round_analysis_payload(
             "round_num":              candidate["round_num"],
             "map_name":               candidate_record.get("map_name"),
             "event_name":             candidate_record.get("event_name"),
+            "team1_name":              candidate_record.get("team1_name"),
+            "team2_name":              candidate_record.get("team2_name"),
             "team_ct":                candidate_record.get("team_ct"),
             "team_t":                 candidate_record.get("team_t"),
             "match_date":             (

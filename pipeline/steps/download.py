@@ -13,6 +13,10 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
+from backend.log import get_logger
+
+log = get_logger("DOWNLOAD")
+
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -62,20 +66,17 @@ async def _do_download(page, demo_url: str, dest: Path) -> None:
     dest_part.rename(dest)
     elapsed = int(time.monotonic() - start)
     size_mb = dest.stat().st_size / 1_048_576
-    print(f"[download] → {dest.name} ({size_mb:.1f} MB, {elapsed}s)")
+    log.info("-> %s (%.1f MB, %ds)", dest.name, size_mb, elapsed)
 
 
 async def _run(match: dict, dest_dir: Path, retries: int) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = archive_path(match, dest_dir)
     if dest.exists():
-        print(f"[download] SKIP (exists): {dest.name}")
+        log.info("SKIP (exists): %s", dest.name)
         return dest
 
-    print(
-        f"[download] starting {match['match_id']} -> {dest.name}",
-        flush=True,
-    )
+    log.info("starting %s -> %s", match["match_id"], dest.name)
 
     pw = await async_playwright().start()
 
@@ -100,7 +101,7 @@ async def _run(match: dict, dest_dir: Path, retries: int) -> Path:
                 return dest
             except Exception as e:
                 last_err = e
-                print(f"[download] ERROR (attempt {attempt}/{retries}): {e}")
+                log.error("attempt %d/%d failed: %s", attempt, retries, e)
                 if attempt < retries:
                     try:
                         await browser.close()

@@ -105,6 +105,8 @@ export interface SimilarityBestMatch {
   score: number;
   reason: string;
   event_name: string | null;
+  team1_name: string | null;
+  team2_name: string | null;
   team_ct: string | null;
   team_t: string | null;
   match_date: string | null;
@@ -164,6 +166,8 @@ export interface RoundAnalysisCandidate {
   map_name: string | null;
   map: { key: string; name: string; display: string };
   event_name: string | null;
+  team1_name: string | null;
+  team2_name: string | null;
   team_ct: string | null;
   team_t: string | null;
   match_date: string | null;

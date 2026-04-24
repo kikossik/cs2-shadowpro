@@ -23,16 +23,165 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ── Pro matches (HLTV-sourced) ────────────────────────────────────────────────
+-- ── Match dimensions ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS match_types (
+    match_type  TEXT PRIMARY KEY,
+    description TEXT
+);
+
+INSERT INTO match_types (match_type, description) VALUES
+    ('unknown',     'Unknown or not yet classified'),
+    ('premier',     'Valve Premier match'),
+    ('competitive', 'Valve Competitive match'),
+    ('faceit',      'FACEIT match'),
+    ('hltv',        'HLTV-sourced pro match')
+ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS events (
+    event_id         TEXT PRIMARY KEY,
+    source_type      TEXT NOT NULL,
+    source_event_id  TEXT,
+    event_name       TEXT NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (source_type, source_event_id),
+    UNIQUE (source_type, event_name)
+);
+
+CREATE TABLE IF NOT EXISTS teams (
+    team_id          TEXT PRIMARY KEY,
+    source_type      TEXT NOT NULL,
+    source_team_id   TEXT,
+    team_name        TEXT NOT NULL,
+    normalized_name  TEXT NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (source_type, source_team_id),
+    UNIQUE (source_type, normalized_name)
+);
+
+CREATE TABLE IF NOT EXISTS matches (
+    match_id          TEXT PRIMARY KEY,
+    source_type       TEXT NOT NULL CHECK (source_type IN ('user', 'pro')),
+    match_type        TEXT NOT NULL DEFAULT 'unknown' REFERENCES match_types (match_type),
+    external_match_id TEXT,
+    source_url        TEXT,
+    source_slug       TEXT,
+    share_code        TEXT,
+    steam_id          TEXT REFERENCES users (steam_id) ON DELETE CASCADE,
+    event_id          TEXT REFERENCES events (event_id),
+    played_at         TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (source_type, external_match_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_matches_source_type ON matches (source_type, match_type);
+CREATE INDEX IF NOT EXISTS idx_matches_steam ON matches (steam_id, played_at DESC);
+CREATE INDEX IF NOT EXISTS idx_matches_event ON matches (event_id, played_at DESC);
+
+CREATE TABLE IF NOT EXISTS match_teams (
+    match_id          TEXT NOT NULL REFERENCES matches (match_id) ON DELETE CASCADE,
+    team_slot         SMALLINT NOT NULL CHECK (team_slot IN (1, 2)),
+    team_id           TEXT NOT NULL REFERENCES teams (team_id),
+    source_team_name  TEXT,
+    PRIMARY KEY (match_id, team_slot)
+);
+
+-- A game is one parsed map/demo. This is the grain used by replay, retrieval,
+-- artifacts, and round facts.
+CREATE TABLE IF NOT EXISTS games (
+    game_id                TEXT PRIMARY KEY,
+    match_id               TEXT NOT NULL REFERENCES matches (match_id) ON DELETE CASCADE,
+    source_type            TEXT NOT NULL CHECK (source_type IN ('user', 'pro')),
+    map_name               TEXT NOT NULL REFERENCES maps (map_name),
+    map_number             SMALLINT,
+    demo_stem              TEXT NOT NULL,
+    demo_path              TEXT,
+    parquet_dir            TEXT,
+    artifact_path          TEXT,
+    ct_round_wins          SMALLINT,
+    t_round_wins           SMALLINT,
+    team1_score            SMALLINT,
+    team2_score            SMALLINT,
+    round_count            SMALLINT,
+    tick_rate              SMALLINT,
+    parser_version         TEXT,
+    artifact_version       TEXT,
+    window_feature_version TEXT,
+    ingest_status          TEXT NOT NULL DEFAULT 'pending'
+        CHECK (ingest_status IN ('pending', 'processing', 'ready', 'error')),
+    ingest_error           TEXT,
+    ingested_at            TIMESTAMPTZ,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_games_match ON games (match_id);
+CREATE INDEX IF NOT EXISTS idx_games_source_map ON games (source_type, map_name);
+CREATE INDEX IF NOT EXISTS idx_games_status ON games (ingest_status, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS game_teams (
+    game_id          TEXT NOT NULL REFERENCES games (game_id) ON DELETE CASCADE,
+    team_id          TEXT NOT NULL REFERENCES teams (team_id),
+    source_team_slot SMALLINT CHECK (source_team_slot IN (1, 2)),
+    side_first       TEXT CHECK (side_first IN ('ct', 't')),
+    score            SMALLINT,
+    won              BOOLEAN,
+    PRIMARY KEY (game_id, team_id)
+);
+
+CREATE TABLE IF NOT EXISTS rounds (
+    game_id           TEXT     NOT NULL REFERENCES games (game_id) ON DELETE CASCADE,
+    round_num         SMALLINT NOT NULL,
+    start_tick        INTEGER,
+    freeze_end_tick   INTEGER,
+    end_tick          INTEGER,
+    official_end_tick INTEGER,
+    winner_side       TEXT CHECK (winner_side IN ('ct', 't')),
+    reason            TEXT,
+    bomb_plant_tick   INTEGER,
+    bomb_site         TEXT,
+    duration_ticks    INTEGER,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (game_id, round_num)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rounds_winner ON rounds (winner_side);
+CREATE INDEX IF NOT EXISTS idx_rounds_bomb_site ON rounds (bomb_site);
+
+CREATE TABLE IF NOT EXISTS game_artifacts (
+    artifact_id BIGSERIAL PRIMARY KEY,
+    game_id     TEXT NOT NULL REFERENCES games (game_id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    version     TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    content_hash TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (game_id, kind, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_artifacts_game ON game_artifacts (game_id, kind);
+
+-- ── Legacy pro map demos (kept for compatibility during migration) ───────────
 CREATE TABLE IF NOT EXISTS pro_matches (
     match_id     TEXT PRIMARY KEY,
+    hltv_match_id TEXT,
     hltv_url     TEXT,
     map_name     TEXT NOT NULL REFERENCES maps (map_name),
+    match_type   TEXT NOT NULL DEFAULT 'hltv' REFERENCES match_types (match_type),
     event_name   TEXT,
+    team1_name   TEXT,
+    team2_name   TEXT,
     team_ct      TEXT,
     team_t       TEXT,
+    ct_round_wins SMALLINT,
+    t_round_wins  SMALLINT,
     score_ct     SMALLINT,
     score_t      SMALLINT,
+    round_count  SMALLINT,
     match_date   DATE,
     parquet_dir  TEXT,
     -- Path to single JSON artifact containing all rounds for this match.
@@ -49,6 +198,7 @@ CREATE TABLE IF NOT EXISTS user_matches (
     steam_id        TEXT        NOT NULL REFERENCES users (steam_id) ON DELETE CASCADE,
     map_name        TEXT        NOT NULL REFERENCES maps (map_name),
     share_code      TEXT,
+    match_type      TEXT        NOT NULL DEFAULT 'unknown' REFERENCES match_types (match_type),
     match_date      TIMESTAMPTZ,
     score_ct        SMALLINT,
     score_t         SMALLINT,
@@ -71,6 +221,7 @@ CREATE INDEX IF NOT EXISTS idx_user_matches_map   ON user_matches (map_name);
 -- ── Event windows (retrieval corpus for user/pro situation matching) ─────────
 CREATE TABLE IF NOT EXISTS event_windows (
     window_id       TEXT PRIMARY KEY,
+    game_id         TEXT        REFERENCES games (game_id) ON DELETE CASCADE,
     source_type     TEXT        NOT NULL CHECK (source_type IN ('user', 'pro')),
     source_match_id TEXT        NOT NULL,
     steam_id        TEXT,
@@ -93,6 +244,8 @@ CREATE TABLE IF NOT EXISTS event_windows (
 
 CREATE INDEX IF NOT EXISTS idx_event_windows_source
     ON event_windows (source_type, source_match_id);
+CREATE INDEX IF NOT EXISTS idx_event_windows_game
+    ON event_windows (game_id);
 CREATE INDEX IF NOT EXISTS idx_event_windows_map_phase
     ON event_windows (map_name, phase, source_type);
 CREATE INDEX IF NOT EXISTS idx_event_windows_anchor

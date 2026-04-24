@@ -16,6 +16,10 @@ import re
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 from playwright_stealth import Stealth
 
+from backend.log import get_logger
+
+log = get_logger("SCRAPE")
+
 RESULTS_URL = "https://www.hltv.org/results"
 
 UA = (
@@ -122,8 +126,8 @@ async def _get_match_info(page, match_url: str) -> dict:
             result["error"] = "no demo links found"
             debug = info.get("debug_hrefs", [])
             title = await page.title()
-            print(f"[scrape] DEBUG page title: {title!r}")
-            print(f"[scrape] DEBUG demo-related hrefs: {debug}")
+            log.debug("page title: %r", title)
+            log.debug("demo-related hrefs: %s", debug)
 
     except PlaywrightTimeout:
         result["error"] = "timeout"
@@ -135,10 +139,7 @@ async def _get_match_info(page, match_url: str) -> dict:
 
 async def _run(limit: int, delay: float, results_url: str) -> list[dict]:
     async with async_playwright() as pw:
-        print(
-            f"[scrape] launching chromium headless={_headless()} limit={limit} url={results_url}",
-            flush=True,
-        )
+        log.info("launching chromium headless=%s limit=%s url=%s", _headless(), limit, results_url)
         browser = await pw.chromium.launch(**_browser_launch_kwargs())
         ctx = await browser.new_context(
             user_agent=UA,
@@ -149,7 +150,7 @@ async def _run(limit: int, delay: float, results_url: str) -> list[dict]:
         await _stealth.apply_stealth_async(page)
 
         match_urls = await _collect_match_urls(page, limit, results_url)
-        print(f"[scrape] collected {len(match_urls)} match URLs")
+        log.info("collected %d match URLs", len(match_urls))
 
         matches = []
         for i, url in enumerate(match_urls, 1):
@@ -159,7 +160,7 @@ async def _run(limit: int, delay: float, results_url: str) -> list[dict]:
 
             info = await _get_match_info(page, url)
             status = info["demo_url"] or f"SKIP ({info['error']})"
-            print(f"[scrape] [{i:3}/{len(match_urls)}] {slug} → {status}")
+            log.info("[%3d/%d] %s -> %s", i, len(match_urls), slug, status)
 
             matches.append({
                 "match_id":   match_id,

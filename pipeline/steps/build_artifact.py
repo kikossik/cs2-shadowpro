@@ -19,6 +19,9 @@ from pathlib import Path
 import polars as pl
 
 from backend.config import derived_match_dir, to_managed_path
+from backend.log import get_logger
+
+log = get_logger("ARTIFACT")
 from pipeline.features.extract_windows import list_match_anchor_specs, load_match_frames
 from pipeline.features.featurize_windows import FEATURE_VERSION, TICK_RATE, build_window_features
 
@@ -860,6 +863,7 @@ def build_match_artifact(
     steam_id: str | None = None,
 ) -> str:
     """Build a single JSON artifact for the entire match. Returns the artifact path."""
+    log.info("building %s (%s)", source_match_id, map_name)
     frames = load_match_frames(parquet_dir, stem)
     rounds = frames["rounds"]
     if rounds.height == 0:
@@ -965,4 +969,5 @@ def build_match_artifact(
             indent=2,
         )
 
+    log.info("done %s: %d rounds -> %s", source_match_id, len(rounds_data), artifact_path.name)
     return to_managed_path(artifact_path)

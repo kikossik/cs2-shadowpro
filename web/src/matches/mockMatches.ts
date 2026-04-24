@@ -71,6 +71,7 @@ export const MOCK_MATCHES: Match[] = (() => {
       id: `m_${String(i).padStart(4, "0")}`,
       map,
       date: Math.floor(date.getTime() / 1000),
+      match_type: i % 5 === 0 ? "premier" : "competitive",
       score: { ct: mineWins, t: theirWins },
       result,
       user_side_first: userSide,
