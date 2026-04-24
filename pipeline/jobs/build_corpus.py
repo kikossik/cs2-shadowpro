@@ -54,7 +54,6 @@ async def build_corpus(limit: int | None = None, force: bool = False) -> dict:
                 and _artifact_is_current(existing_artifact)
             )
             indexed_windows = await db.count_event_windows(
-                "pro",
                 match["match_id"],
                 feature_version=FEATURE_VERSION,
             )

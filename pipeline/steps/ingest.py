@@ -134,28 +134,6 @@ async def ingest_pro_demo(demo_path: Path, match_id: str, **meta) -> dict:
         )
         await db.upsert_rounds(match_id, round_rows)
 
-        # Keep the legacy table populated, but with explicit non-side labels.
-        await db.upsert_pro_match(
-            match_id,
-            hltv_match_id = str(hltv_match_id) if hltv_match_id else None,
-            map_name      = map_name,
-            match_type    = "hltv",
-            parquet_dir   = str(parquet_dir),
-            artifact_path = artifact_path,
-            team1_name    = team1_name,
-            team2_name    = team2_name,
-            team_ct       = team1_name,
-            team_t        = team2_name,
-            ct_round_wins = ct_round_wins,
-            t_round_wins  = t_round_wins,
-            score_ct      = ct_round_wins,
-            score_t       = t_round_wins,
-            round_count   = round_count,
-            match_date    = match_date,
-            hltv_url      = meta.get("hltv_url"),
-            event_name    = meta.get("event_name"),
-        )
-
         windows = extract_match_event_windows(
             source_type="pro",
             source_match_id=match_id,

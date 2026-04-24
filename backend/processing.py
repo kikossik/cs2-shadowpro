@@ -13,6 +13,7 @@ import polars as pl
 from awpy import Demo
 
 from backend import config, db
+from pipeline.features.extract_windows import extract_match_event_windows
 from pipeline.features.featurize_windows import FEATURE_VERSION, TICK_RATE
 from pipeline.steps.build_artifact import ARTIFACT_VERSION, build_match_artifact
 
@@ -206,7 +207,7 @@ def _write_parquets(dem: Demo, parquet_dir: Path, demo_id: str) -> None:
     _w(flashes, "flashes")
 
 
-async def _save_match(demo_id: str, kwargs: dict, game_kwargs: dict, round_rows: list[dict]) -> None:
+async def _save_match(demo_id: str, player_kwargs: dict, game_kwargs: dict, round_rows: list[dict], windows: list[dict]) -> None:
     # process_demo runs in a ThreadPoolExecutor via asyncio.run(), which creates a new
     # event loop. The global db._pool was created in FastAPI's main event loop and
     # cannot be used from a different loop, so we create a fresh pool here.
@@ -215,9 +216,12 @@ async def _save_match(demo_id: str, kwargs: dict, game_kwargs: dict, round_rows:
     orig_pool = db._pool
     db._pool = pool
     try:
-        await db.upsert_user_match(demo_id, **kwargs)
         await db.upsert_user_game(game_id=demo_id, **game_kwargs)
+        await db.upsert_game_player_stats(game_id=demo_id, **player_kwargs)
         await db.upsert_rounds(demo_id, round_rows)
+        for window in windows:
+            window_id = window.pop("window_id")
+            await db.upsert_event_window(window_id, **window)
     finally:
         db._pool = orig_pool
         await pool.close()
@@ -256,33 +260,46 @@ def process_demo(
             map_name=map_name,
             steam_id=steam_id,
         )
-        db_kwargs = {
-            "steam_id":        steam_id,
-            "map_name":        map_name,
-            "match_type":      match_type or "unknown",
-            "match_date":      match_date,
-            "parquet_dir":     str(parquet_dir),
-            "artifact_path":   artifact_path,
-            "share_code":      share_code,
-            **{k: stats.get(k) for k in (
-                "score_ct", "score_t", "user_side_first", "user_result",
-                "kills", "deaths", "assists", "hs_pct", "round_count",
-            )},
-        }
+        ct_round_wins = int((rounds["winner"] == "ct").sum()) if rounds.height > 0 and "winner" in rounds.columns else None
+        t_round_wins  = int((rounds["winner"] == "t").sum())  if rounds.height > 0 and "winner" in rounds.columns else None
+
         game_kwargs = {
-            "steam_id":                 steam_id,
-            "map_name":                 map_name,
-            "match_type":               match_type or "unknown",
-            "share_code":               share_code,
-            "match_date":               match_date,
-            "parquet_dir":              str(parquet_dir),
-            "artifact_path":            artifact_path,
-            "round_count":              stats.get("round_count"),
-            "tick_rate":                TICK_RATE,
-            "artifact_version":         ARTIFACT_VERSION,
-            "window_feature_version":   FEATURE_VERSION,
+            "steam_id":               steam_id,
+            "map_name":               map_name,
+            "match_type":             match_type or "unknown",
+            "share_code":             share_code,
+            "match_date":             match_date,
+            "parquet_dir":            str(parquet_dir),
+            "artifact_path":          artifact_path,
+            "demo_path":              str(demo_path),
+            "round_count":            stats.get("round_count"),
+            "ct_round_wins":          ct_round_wins,
+            "t_round_wins":           t_round_wins,
+            "tick_rate":              TICK_RATE,
+            "artifact_version":       ARTIFACT_VERSION,
+            "window_feature_version": FEATURE_VERSION,
         }
-        asyncio.run(_save_match(demo_id, db_kwargs, game_kwargs, round_rows))
+        # Player stats go to game_player_stats (score_ct/score_t are the user's
+        # team rounds won/lost, not raw CT/T side win counts).
+        player_kwargs = {
+            "steam_id":   steam_id,
+            "side_first": stats.get("user_side_first"),
+            "rounds_won":  stats.get("score_ct"),
+            "rounds_lost": stats.get("score_t"),
+            "result":     stats.get("user_result"),
+            "kills":      stats.get("kills"),
+            "deaths":     stats.get("deaths"),
+            "assists":    stats.get("assists"),
+            "hs_pct":     stats.get("hs_pct"),
+        }
+        windows = extract_match_event_windows(
+            source_type="user",
+            source_match_id=demo_id,
+            parquet_dir=parquet_dir,
+            stem=demo_id,
+            map_name=map_name,
+        )
+        asyncio.run(_save_match(demo_id, player_kwargs, game_kwargs, round_rows, windows))
     except Exception:
         _delete_parquets(parquet_dir, demo_id)
         raise
