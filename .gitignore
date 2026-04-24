@@ -1,0 +1,55 @@
+# Secrets / local env
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Node / frontend
+web/node_modules/
+web/dist/
+web/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Docker / local runtime
+docker-compose.override.yml
+
+# CS2 demo inputs and generated data
+demos_user/
+demos_pro/
+parquet_user/
+parquet_pro/
+derived_user/
+derived_pro/
+*.dem
+*.dem.bz2
+*.part
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local assistant/tooling state
+.claude/settings.local.json
