@@ -13,6 +13,29 @@ DEFAULT_WINDOW_POST_TICKS = 320
 DEFAULT_SLIDE_STEP_TICKS = 128
 TICK_RATE = 64
 
+# Situations where the CT side has the key decisions to make (retake, hold)
+_CT_SITUATIONS = frozenset({"retake", "site_hold", "post_plant"})
+# Situations where the T side has the key decisions to make (execute, setup)
+_T_SITUATIONS = frozenset({"exec_like", "setup"})
+
+
+def _infer_pro_side_to_query(primary_situation: str, alive_ct: int, alive_t: int) -> str:
+    """Derive side_to_query for pro windows that have no specific user.
+
+    Uses the primary situation label to pick the side with agency in that
+    scenario, falling back to the underdog (fewer alive) for neutral situations.
+    """
+    if primary_situation in _CT_SITUATIONS:
+        return "ct"
+    if primary_situation in _T_SITUATIONS:
+        return "t"
+    if alive_ct < alive_t:
+        return "ct"
+    if alive_t < alive_ct:
+        return "t"
+    return "ct"
+
+
 _SITE_A_TOKENS = {
     "a", "abombsite", "bombsitea", "asite", "aramp", "ramp", "palace", "heaven",
 }
@@ -681,7 +704,10 @@ def build_window_features(
         t_path_distance=_path_distance(t_path),
     )
 
-    side_to_query = _lookup_user_side(anchor_frame, user_steam_id)
+    user_side = _lookup_user_side(anchor_frame, user_steam_id)
+    side_to_query = user_side if user_side is not None else _infer_pro_side_to_query(
+        primary_situation, ct_state["alive"], t_state["alive"]
+    )
     focus_weapon_family = _lookup_user_weapon_family(anchor_frame, user_steam_id)
     queryable = (time_since_freeze_end_s is None or time_since_freeze_end_s >= MIN_MAPPING_SECONDS)
     skip_reason = None if queryable else f"anchor is only {time_since_freeze_end_s:.2f}s after freeze end"

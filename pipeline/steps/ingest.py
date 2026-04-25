@@ -14,7 +14,10 @@ from datetime import date
 from pathlib import Path
 
 import polars as pl
+import awpy
 from awpy import Demo
+
+_AWPY_VERSION = getattr(awpy, "__version__", "unknown")
 
 from backend import config, db
 from backend.log import get_logger
@@ -129,6 +132,7 @@ async def ingest_pro_demo(demo_path: Path, match_id: str, **meta) -> dict:
             demo_path=str(demo_path),
             map_number=meta.get("map_number"),
             tick_rate=TICK_RATE,
+            parser_version=_AWPY_VERSION,
             artifact_version=ARTIFACT_VERSION,
             window_feature_version=FEATURE_VERSION,
         )
