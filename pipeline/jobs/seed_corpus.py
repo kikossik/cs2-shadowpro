@@ -1,8 +1,9 @@
 """One-time job: scrape HLTV and ingest N pro demos per map.
 
-Scrapes a per-map filtered results page (e.g. /results?map=de_mirage) so that
-every page visited is likely to contain a demo for the target map. Archives often
-contain multiple maps, so a single download can satisfy several maps at once.
+Memory strategy: two explicit phases so Playwright and awpy never run together.
+  Phase 1 — scrape all needed match metadata (Playwright open, no awpy).
+  Phase 2 — download + ingest one demo at a time (Playwright done, awpy + polars).
+             gc.collect() is called between each demo to release awpy dataframes.
 
 Usage:
     python -m pipeline.jobs.seed_corpus                       # 5 per map (default)
@@ -15,6 +16,7 @@ import argparse
 import asyncio
 import os
 import traceback
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 os.environ.setdefault("PLAYWRIGHT_HEADLESS", "1")
@@ -22,7 +24,7 @@ os.environ.setdefault("PLAYWRIGHT_HEADLESS", "1")
 from backend import config, db
 from backend.log import get_logger
 from pipeline.steps.decompress import extract_all_dems
-from pipeline.steps.download import download_archive
+from pipeline.steps.download import DownloadSession
 from pipeline.steps.ingest import ingest_pro_demo
 from pipeline.steps.scrape import scrape_pro_matches
 
@@ -54,64 +56,115 @@ async def _per_map_counts() -> dict[str, int]:
     return {r["map_name"]: r["cnt"] for r in rows}
 
 
-async def _process_archive(
-    match: dict,
+async def _scrape_phase(needed: dict[str, int], limit: int) -> list[dict]:
+    """Phase 1: scrape per-map result pages and return deduplicated match list.
+
+    All Playwright browser sessions open and close here. No demo processing
+    happens until this function returns, so awpy never runs alongside Chromium.
+    """
+    collected: list[dict] = []
+    seen_match_ids: set[str] = set()
+
+    for map_name in sorted(needed, key=lambda m: -needed[m]):
+        if needed[map_name] <= 0:
+            continue
+        results_url = _HLTV_RESULTS.format(map_name=map_name)
+        log.info("scraping %s (need %d) ...", map_name, needed[map_name])
+        matches = await scrape_pro_matches(limit=limit, results_url=results_url)
+        log.info("got %d match pages for %s", len(matches), map_name)
+        for match in matches:
+            mid = match.get("match_id")
+            if mid and mid not in seen_match_ids and match.get("demo_url"):
+                seen_match_ids.add(mid)
+                collected.append(match)
+
+    log.info("scrape phase done: %d unique matches with demo URLs", len(collected))
+    return collected
+
+
+async def _ingest_phase(
+    matches: list[dict],
     needed: dict[str, int],
     already_ingested: set[str],
     summary: dict,
 ) -> None:
-    archive: Path | None = None
-    try:
-        archive = await download_archive(match, config.DEMOS_PRO_DIR)
-        dems = extract_all_dems(archive, config.DEMOS_PRO_DIR / "decompressed")
+    """Phase 2: download + ingest one archive at a time.
 
-        for map_number, dem in enumerate(dems, start=1):
-            tag = dem.stem.rsplit("_", 1)[-1]
-            dem_map = _TAG_TO_MAP.get(tag)
+    Playwright is fully closed before this runs. One ProcessPoolExecutor is
+    shared across all demos so the worker process is reused rather than
+    respawned for every archive. awpy memory is freed at the subprocess level
+    after each task completes, so gc.collect() in the main process isn't needed.
+    """
+    processed_match_ids: set[str] = set()
 
-            if not dem_map:
-                dem.unlink(missing_ok=True)
-                continue
+    with ProcessPoolExecutor(max_workers=1) as executor:
+        async with DownloadSession() as session:
+            for match in matches:
+                if all(v == 0 for v in needed.values()):
+                    log.info("all maps satisfied — stopping")
+                    break
 
-            if dem.stem in already_ingested:
-                summary["skipped"] += 1
-                dem.unlink(missing_ok=True)
-                continue
+                match_id = match.get("match_id")
+                if match_id in processed_match_ids:
+                    continue
+                processed_match_ids.add(match_id)
 
-            if needed.get(dem_map, 0) <= 0:
-                dem.unlink(missing_ok=True)
-                continue
+                archive: Path | None = None
+                try:
+                    archive = await session.download(match, config.DEMOS_PRO_DIR)
+                    dems = extract_all_dems(archive, config.DEMOS_PRO_DIR / "decompressed")
 
-            try:
-                await ingest_pro_demo(
-                    dem,
-                    dem.stem,
-                    hltv_match_id=match.get("match_id"),
-                    hltv_url=match.get("match_url"),
-                    source_slug=match.get("slug"),
-                    event_name=match.get("event_name"),
-                    team1_name=match.get("team1"),
-                    team2_name=match.get("team2"),
-                    match_date=match.get("match_date"),
-                    map_number=map_number,
-                )
-                already_ingested.add(dem.stem)
-                needed[dem_map] -= 1
-                summary["maps_ingested"] += 1
-                dem.unlink(missing_ok=True)
-                log.info("ingested %s (%d more needed for %s)", dem.name, needed[dem_map], dem_map)
-            except Exception as exc:
-                summary["errors"].append({"dem": dem.name, "error": str(exc)})
-                log.error("INGEST ERROR %s: %s", dem.name, exc)
-                traceback.print_exc()
+                    for map_number, dem in enumerate(dems, start=1):
+                        tag = dem.stem.rsplit("_", 1)[-1]
+                        dem_map = _TAG_TO_MAP.get(tag)
 
-    except Exception as exc:
-        summary["errors"].append({"match_id": match.get("match_id"), "error": str(exc)})
-        log.error("MATCH ERROR %s: %s", match.get("match_id"), exc)
-        traceback.print_exc()
-    finally:
-        if archive is not None:
-            archive.unlink(missing_ok=True)
+                        if not dem_map:
+                            dem.unlink(missing_ok=True)
+                            continue
+
+                        if dem.stem in already_ingested:
+                            summary["skipped"] += 1
+                            dem.unlink(missing_ok=True)
+                            continue
+
+                        if needed.get(dem_map, 0) <= 0:
+                            dem.unlink(missing_ok=True)
+                            continue
+
+                        try:
+                            await ingest_pro_demo(
+                                dem,
+                                dem.stem,
+                                executor=executor,
+                                hltv_match_id=match.get("match_id"),
+                                hltv_url=match.get("match_url"),
+                                source_slug=match.get("slug"),
+                                event_name=match.get("event_name"),
+                                team1_name=match.get("team1"),
+                                team2_name=match.get("team2"),
+                                match_date=match.get("match_date"),
+                                map_number=map_number,
+                            )
+                            already_ingested.add(dem.stem)
+                            needed[dem_map] -= 1
+                            summary["maps_ingested"] += 1
+                            dem.unlink(missing_ok=True)
+                            log.info(
+                                "ingested %s (%d more needed for %s)",
+                                dem.name, needed[dem_map], dem_map,
+                            )
+                        except Exception as exc:
+                            summary["errors"].append({"dem": dem.name, "error": str(exc)})
+                            log.error("INGEST ERROR %s: %s", dem.name, exc)
+                            traceback.print_exc()
+
+                except Exception as exc:
+                    summary["errors"].append({"match_id": match.get("match_id"), "error": str(exc)})
+                    log.error("MATCH ERROR %s: %s", match.get("match_id"), exc)
+                    traceback.print_exc()
+                finally:
+                    if archive is not None:
+                        archive.unlink(missing_ok=True)
 
 
 async def seed_corpus(matches_per_map: int = 5, limit: int = 30) -> dict:
@@ -138,36 +191,12 @@ async def seed_corpus(matches_per_map: int = 5, limit: int = 30) -> dict:
             return summary
 
         already_ingested = await db.get_ingested_pro_match_ids()
-        # Track which HLTV match IDs we've already downloaded to avoid
-        # re-downloading the same archive when it appears on multiple maps' pages.
-        processed_match_ids: set[str] = set()
 
-        # Iterate maps sorted most-needed first so we always make progress on
-        # the most starved maps before spending time on already-near-full ones.
-        for map_name in sorted(needed, key=lambda m: -needed[m]):
-            if needed[map_name] <= 0:
-                continue
+        # Phase 1: all Playwright work, no awpy.
+        matches = await _scrape_phase(needed, limit)
 
-            results_url = _HLTV_RESULTS.format(map_name=map_name)
-            log.info("scraping %s (need %d) from %s", map_name, needed[map_name], results_url)
-
-            matches = await scrape_pro_matches(limit=limit, results_url=results_url)
-            log.info("got %d match pages for %s", len(matches), map_name)
-
-            for match in matches:
-                if needed[map_name] <= 0:
-                    break
-
-                match_id = match.get("match_id")
-                if match_id in processed_match_ids:
-                    continue
-
-                if not match.get("demo_url"):
-                    summary["skipped"] += 1
-                    continue
-
-                processed_match_ids.add(match_id)
-                await _process_archive(match, needed, already_ingested, summary)
+        # Phase 2: all awpy work, Playwright is fully closed.
+        await _ingest_phase(matches, needed, already_ingested, summary)
 
     except Exception as exc:
         status = "error"

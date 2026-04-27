@@ -466,6 +466,7 @@ async def upsert_pro_game(
     demo_path: str | None = None,
     map_number: int | None = None,
     tick_rate: int = 64,
+    parser_version: str | None = None,
     artifact_version: str | None = None,
     window_feature_version: str | None = None,
 ) -> None:
@@ -502,6 +503,7 @@ async def upsert_pro_game(
         t_round_wins=t_round_wins,
         round_count=round_count,
         tick_rate=tick_rate,
+        parser_version=parser_version,
         artifact_version=artifact_version,
         window_feature_version=window_feature_version,
         ingest_status="ready",
@@ -766,6 +768,69 @@ async def count_event_windows(
         game_id,
         feature_version,
     ) or 0)
+
+
+async def upsert_event_windows_batch(windows: list[dict]) -> None:
+    """Batch upsert event windows in one executemany call instead of N round trips."""
+    if not windows:
+        return
+    pool = await get_pool()
+    records = []
+    for w in windows:
+        w = dict(w)
+        w.pop("source_type", None)
+        w.pop("source_match_id", None)
+        embedding = w.pop("embedding", None)
+        records.append((
+            w.get("window_id"),
+            w.get("game_id"),
+            w.get("steam_id"),
+            w.get("map_name"),
+            w.get("round_num"),
+            w.get("start_tick"),
+            w.get("anchor_tick"),
+            w.get("end_tick"),
+            w.get("side_to_query"),
+            w.get("phase"),
+            w.get("site"),
+            w.get("anchor_kind"),
+            w.get("alive_ct"),
+            w.get("alive_t"),
+            w.get("feature_version"),
+            w.get("feature_path"),
+            _format_embedding(embedding) if embedding is not None else None,
+        ))
+    await pool.executemany(
+        """
+        INSERT INTO event_windows (
+            window_id, game_id, steam_id, map_name, round_num,
+            start_tick, anchor_tick, end_tick, side_to_query,
+            phase, site, anchor_kind, alive_ct, alive_t,
+            feature_version, feature_path, embedding
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            $10, $11, $12, $13, $14, $15, $16, $17::vector(54)
+        )
+        ON CONFLICT (window_id) DO UPDATE SET
+            game_id         = EXCLUDED.game_id,
+            steam_id        = EXCLUDED.steam_id,
+            map_name        = EXCLUDED.map_name,
+            round_num       = EXCLUDED.round_num,
+            start_tick      = EXCLUDED.start_tick,
+            anchor_tick     = EXCLUDED.anchor_tick,
+            end_tick        = EXCLUDED.end_tick,
+            side_to_query   = EXCLUDED.side_to_query,
+            phase           = EXCLUDED.phase,
+            site            = EXCLUDED.site,
+            anchor_kind     = EXCLUDED.anchor_kind,
+            alive_ct        = EXCLUDED.alive_ct,
+            alive_t         = EXCLUDED.alive_t,
+            feature_version = EXCLUDED.feature_version,
+            feature_path    = EXCLUDED.feature_path,
+            embedding       = EXCLUDED.embedding
+        """,
+        records,
+    )
 
 
 async def upsert_event_window(window_id: str, **kwargs) -> None:

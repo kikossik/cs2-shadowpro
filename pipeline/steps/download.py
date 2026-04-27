@@ -124,3 +124,72 @@ async def download_archive(match: dict, dest_dir: Path, retries: int = 3) -> Pat
     if not match.get("demo_url"):
         raise ValueError(f"match {match.get('match_id')} has no demo_url")
     return await _run(match, dest_dir, retries)
+
+
+class DownloadSession:
+    """Reusable Playwright session for downloading multiple archives.
+
+    Keeps one browser alive across all downloads so we don't pay the browser
+    launch cost (3-5s + ~500MB RAM) for every archive.
+
+    Usage:
+        async with DownloadSession() as session:
+            for match in matches:
+                path = await session.download(match, dest_dir)
+    """
+
+    def __init__(self) -> None:
+        self._pw = None
+        self._browser = None
+        self._ctx = None
+
+    async def __aenter__(self) -> "DownloadSession":
+        self._pw = await async_playwright().start()
+        self._browser = await self._pw.chromium.launch(**_browser_launch_kwargs())
+        self._ctx = await self._browser.new_context(
+            user_agent=UA,
+            viewport={"width": 1920, "height": 1080},
+            locale="en-US",
+            accept_downloads=True,
+        )
+        return self
+
+    async def __aexit__(self, *_) -> None:
+        try:
+            if self._browser:
+                await self._browser.close()
+        except Exception:
+            pass
+        try:
+            if self._pw:
+                await self._pw.stop()
+        except Exception:
+            pass
+
+    async def download(self, match: dict, dest_dir: Path, retries: int = 3) -> Path:
+        if not match.get("demo_url"):
+            raise ValueError(f"match {match.get('match_id')} has no demo_url")
+
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = archive_path(match, dest_dir)
+        if dest.exists():
+            log.info("SKIP (exists): %s", dest.name)
+            return dest
+
+        log.info("starting %s -> %s", match["match_id"], dest.name)
+        last_err: Exception | None = None
+        for attempt in range(1, retries + 1):
+            page = await self._ctx.new_page()
+            await _stealth.apply_stealth_async(page)
+            try:
+                await _do_download(page, match["demo_url"], dest)
+                return dest
+            except Exception as e:
+                last_err = e
+                log.error("attempt %d/%d failed: %s", attempt, retries, e)
+                if attempt < retries:
+                    await asyncio.sleep(3)
+            finally:
+                await page.close()
+
+        raise RuntimeError(f"download failed after {retries} attempts: {last_err}")
