@@ -26,24 +26,60 @@ DEMO_POLL_INTERVAL: int = int(os.getenv("DEMO_POLL_INTERVAL_SECONDS", "5"))
 
 # ── Demo job processing ────────────────────────────────────────────────────────
 
-def _process_one_demo(job: dict) -> None:
-    """Full demo pipeline for one claimed job. Runs in a thread."""
+def _process_one_demo(job: dict) -> dict:
+    """Full demo pipeline for one claimed job. Runs in a thread. Returns result or raises."""
     from backend.processing import process_demo
 
-    job_id     = job["job_id"]
     demo_path  = Path(config.resolve_managed_path(job["demo_path"]) or job["demo_path"])
     demo_id    = job["demo_id"]
     steam_id   = job["steam_id"]
     match_type = job["match_type"]
 
-    log.info("processing demo job %s (%s)", job_id, demo_id)
-    try:
-        result = process_demo(demo_path, steam_id, demo_id, match_type=match_type)
-        asyncio.run(db.finish_demo_job(job_id, result=result))
-        log.info("demo job %s done: map=%s", job_id, result.get("map"))
-    except Exception as exc:
-        log.error("demo job %s failed: %s", job_id, exc, exc_info=True)
-        asyncio.run(db.finish_demo_job(job_id, error=str(exc)))
+    log.info("processing demo job %s (%s)", job["job_id"], demo_id)
+    return process_demo(demo_path, steam_id, demo_id, match_type=match_type)
+
+
+async def _precompute_round_analysis(demo_id: str, round_count: int) -> None:
+    from backend.round_analysis_service import (
+        MATCHER_VERSION, PRO_CORPUS_VERSION, compute_and_cache_round,
+    )
+
+    match_record = await db.get_match_source_record(demo_id)
+    if match_record is None:
+        log.warning("precompute: no match record found for %s", demo_id)
+        return
+
+    log.info("precomputing round analysis for %s (%d rounds)", demo_id, round_count)
+
+    for round_num in range(1, round_count + 1):
+        cache_key = f"{demo_id}:{round_num}:both:{PRO_CORPUS_VERSION}:{MATCHER_VERSION}"
+        await db.upsert_round_analysis_result(
+            cache_key=cache_key,
+            demo_id=demo_id,
+            round_num=round_num,
+            logic="both",
+            matcher_version=MATCHER_VERSION,
+            pro_corpus_version=PRO_CORPUS_VERSION,
+            status="pending",
+        )
+
+    for round_num in range(1, round_count + 1):
+        cache_key = f"{demo_id}:{round_num}:both:{PRO_CORPUS_VERSION}:{MATCHER_VERSION}"
+        try:
+            await compute_and_cache_round(demo_id, round_num, "both", match_record)
+            log.info("precompute %s round %d/%d done", demo_id, round_num, round_count)
+        except Exception as exc:
+            log.error("precompute %s round %d failed: %s", demo_id, round_num, exc, exc_info=True)
+            await db.upsert_round_analysis_result(
+                cache_key=cache_key,
+                demo_id=demo_id,
+                round_num=round_num,
+                logic="both",
+                matcher_version=MATCHER_VERSION,
+                pro_corpus_version=PRO_CORPUS_VERSION,
+                status="error",
+                error_message=str(exc),
+            )
 
 
 async def _claim_and_process() -> bool:
@@ -52,7 +88,16 @@ async def _claim_and_process() -> bool:
     if job is None:
         return False
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _process_one_demo, job)
+    try:
+        result = await loop.run_in_executor(None, _process_one_demo, job)
+        await db.finish_demo_job(job["job_id"], result=result)
+        log.info("demo job %s done: map=%s", job["job_id"], result.get("map"))
+        round_count = result.get("round_count") or 0
+        if round_count > 0:
+            await _precompute_round_analysis(job["demo_id"], round_count)
+    except Exception as exc:
+        log.error("demo job %s failed: %s", job["job_id"], exc, exc_info=True)
+        await db.finish_demo_job(job["job_id"], error=str(exc))
     return True
 
 
