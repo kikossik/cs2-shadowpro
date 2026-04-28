@@ -150,6 +150,7 @@ async def upsert_event_dimension(
     """Upsert a source event/tournament dimension and return event_id."""
     if not event_name or not event_name.strip():
         return None
+    source_event_id = source_event_id or None  # normalize '' → NULL
     event_id = (
         f"{source_type}_event_{source_event_id}"
         if source_event_id
@@ -543,7 +544,12 @@ async def upsert_user_game(
     artifact_version: str | None = None,
     window_feature_version: str | None = None,
 ) -> None:
-    """Upsert canonical dimensions/facts for one user-imported map demo."""
+    """Upsert canonical dimensions/facts for one user-imported map demo.
+
+    match_teams and game_teams are intentionally not populated: user games
+    have no named teams, and every query that joins them uses LEFT JOIN, so
+    callers receive NULL team names rather than crashing.
+    """
     match_id = user_match_key(game_id)
     await upsert_match_dimension(
         match_id,

@@ -15,7 +15,7 @@ from backend.log import get_logger
 
 log = get_logger("ROUND_ANALYSIS")
 
-MATCHER_VERSION = "clean-v2"
+MATCHER_VERSION = "clean-v3"
 PRO_CORPUS_VERSION = "event-windows-v1"
 
 _MAP_DISPLAY: dict[str, str] = {

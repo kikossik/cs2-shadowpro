@@ -623,12 +623,16 @@ def match_nav_rounds(
     # Try every user player × every pro player on the same side, pick best
     best: dict | None = None
     best_score = -1.0
-    for u_seq in user_candidates.values():
-        for p_seq in pro_seqs.values():
+    best_user_steamid: str | None = None
+    best_pro_steamid: str | None = None
+    for u_steamid, u_seq in user_candidates.items():
+        for p_steamid, p_seq in pro_seqs.items():
             pair = score_player_pair(u_seq, p_seq, map_name)
             if pair is not None and float(pair["round_score"]) > best_score:
                 best_score = float(pair["round_score"])
                 best = pair
+                best_user_steamid = str(u_steamid)
+                best_pro_steamid = str(p_steamid)
 
     if best is None:
         return _fallback_result
@@ -675,6 +679,8 @@ def match_nav_rounds(
         "break_event": break_event,
         "survival_gap_s": _round_seconds(survival_gap),
         "summary": _nav_summary_real(query_side, best),
+        "user_focal_steamid": best_user_steamid,
+        "matched_pro_steamid": best_pro_steamid,
     }
 
 

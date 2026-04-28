@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from backend import config, db
 from backend.log import get_logger
+from pipeline.features.featurize_windows import TICK_RATE
 from backend.round_analysis_service import (
     MATCHER_VERSION as _ROUND_ANALYSIS_MATCHER_VERSION,
     PRO_CORPUS_VERSION as _ROUND_ANALYSIS_PRO_CORPUS_VERSION,
@@ -273,6 +274,8 @@ def _read_round_replay_payload(demo_id: str, round_num: int, parquet_dir: str, m
         else (int(raw_ticks['tick'].min()) if raw_ticks.height > 0 else 0)
     )
 
+    round_meta = _build_round_meta(rounds_all, r_rounds, rn, freeze_end)
+
     ticks    = raw_ticks.filter(pl.col('tick') >= freeze_end).sort('tick')
     shots    = shots_all.filter((pl.col('round_num') == rn) & (pl.col('tick') >= freeze_end))
     smokes   = smokes_all.filter(
@@ -370,6 +373,48 @@ def _read_round_replay_payload(demo_id: str, round_num: int, parquet_dir: str, m
         "infernos":        infernos_payload,
         "flashes":         flashes_payload,
         "grenade_paths":   list(gren_by_entity.values()),
+        "round_meta":      round_meta,
+    }
+
+
+def _build_round_meta(
+    rounds_all: pl.DataFrame,
+    r_rounds: pl.DataFrame,
+    round_num: int,
+    freeze_end: int,
+) -> dict:
+    """Per-round metadata: scoreline going-in, outcome, bomb plant."""
+    cols = set(rounds_all.columns)
+
+    score_ct = score_t = 0
+    if "winner" in cols:
+        prior = rounds_all.filter(pl.col("round_num") < round_num)
+        score_ct = int((prior["winner"] == "ct").sum())
+        score_t  = int((prior["winner"] == "t").sum())
+
+    outcome: dict = {"winner_side": None, "reason": None, "bomb_site": None,
+                     "bomb_plant_tick": None, "bomb_plant_offset_s": None,
+                     "official_end_tick": None}
+    if r_rounds.height > 0:
+        row = r_rounds.row(0, named=True)
+        outcome["winner_side"] = row.get("winner")
+        outcome["reason"]      = row.get("reason")
+        outcome["bomb_site"]   = row.get("bomb_site")
+
+        plant = row.get("bomb_plant")
+        if plant is not None:
+            plant_tick = int(plant)
+            outcome["bomb_plant_tick"] = plant_tick
+            outcome["bomb_plant_offset_s"] = round(max(0, plant_tick - freeze_end) / TICK_RATE, 1)
+
+        for key in ("official_end", "end"):
+            if key in cols and row.get(key) is not None:
+                outcome["official_end_tick"] = int(row[key])
+                break
+
+    return {
+        "score_before": {"ct": score_ct, "t": score_t},
+        "outcome":      outcome,
     }
 
 

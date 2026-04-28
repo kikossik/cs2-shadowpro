@@ -65,6 +65,20 @@ export interface GrenadePathEvent {
   path: GrenadePathPoint[];
 }
 
+export interface RoundOutcome {
+  winner_side: "ct" | "t" | null;
+  reason: string | null;
+  bomb_site: string | null;
+  bomb_plant_tick: number | null;
+  bomb_plant_offset_s: number | null;
+  official_end_tick: number | null;
+}
+
+export interface RoundMeta {
+  score_before: { ct: number; t: number };
+  outcome: RoundOutcome;
+}
+
 export interface RoundReplayData {
   map: string;
   round_num: number;
@@ -76,6 +90,7 @@ export interface RoundReplayData {
   infernos: InfernoEvent[];
   flashes: FlashEvent[];
   grenade_paths: GrenadePathEvent[];
+  round_meta?: RoundMeta;
 }
 
 export interface SimilarityQuery {
@@ -126,6 +141,11 @@ export interface SimilarityBestMatch {
   divergence_start_sec?: number;
   divergence_end_sec?: number;
   summary?: string;
+  user_focal_steamid?: string;
+  matched_pro_steamid?: string;
+  matched_pro_player?: string;
+  pro_steamid?: string;
+  pro_player?: string;
 }
 
 export interface SimilarityMapResponse {
@@ -244,6 +264,11 @@ export interface RoundAnalysisLogicScore {
   pro_time_offset_s?: number;
   divergence_start_sec?: number;
   divergence_end_sec?: number;
+  user_focal_steamid?: string;
+  matched_pro_steamid?: string;
+  matched_pro_player?: string;
+  pro_steamid?: string;
+  pro_player?: string;
 }
 
 export interface RoundAnalysisMatch extends RoundAnalysisCandidate {

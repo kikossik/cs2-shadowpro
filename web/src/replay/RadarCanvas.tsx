@@ -1,26 +1,31 @@
 /**
  * RadarCanvas — Canvas-based 2D round replayer.
  *
- * Direct port of viewer/renderer.py drawing logic to CanvasRenderingContext2D.
- * All coordinates from the API are world units; this component applies the
- * map-specific transform (pos_x / pos_y / scale) to place them on screen.
- *
- * The map image fills a centred square inside the canvas. The HUD / controls
- * are rendered as React JSX outside this component (RoundReplayPage).
+ * Two-tier visual hierarchy: the focal player(s) get full HUD detail
+ * (name, HP, weapon, halo) so the viewer can study them; all other actors
+ * stay context-only (dot + facing arrow). Utility (smokes/molotovs/flashes)
+ * is rendered as flat shapes without duration bars or thrower labels.
  */
 import { useEffect, useRef } from "react";
-import type { MapConfig, RoundReplayData, WeaponMap } from "./types";
+import type { MapConfig, PlayerTick, RoundReplayData, WeaponMap } from "./types";
 import {
-  CT_COLOR, T_COLOR, DEAD_COLOR, WHITE, DIM_COLOR,
+  CT_COLOR, T_COLOR, DEAD_COLOR, WHITE,
   SMOKE_RADIUS_WU, INFERNO_RADIUS_WU,
-  FLASH_VIS_TICKS, TRAIL_FADE_TICKS,
+  FLASH_VIS_TICKS,
   GREN_COLORS, TICKRATE,
   bestWeapon, decodeWeapon,
 } from "./constants";
 
-// ── Geometry constants ─────────────────────────────────────────────────────────
-const PLAYER_R  = 9;
-const ARROW_LEN = PLAYER_R + 13;
+// ── Visual constants ───────────────────────────────────────────────────────────
+const PLAYER_R           = 7;
+const FOCAL_R            = 9;
+const ARROW_LEN          = 14;
+const FOCAL_ARROW_LEN    = 18;
+const FOCAL_COLOR        = "#facc15";
+const FLASHED_COLOR      = "#ffe066";
+
+// In-flight trails fade quickly after detonation/landing.
+const TRAIL_AFTER_TICKS  = 12;
 
 // ── Coordinate transform ───────────────────────────────────────────────────────
 function worldToScreen(
@@ -39,7 +44,7 @@ function worldRToPx(r: number, cfg: MapConfig, imgW: number, dispSize: number): 
   return Math.max(2, (r / cfg.scale) * (dispSize / imgW));
 }
 
-// ── Alpha fill circle ──────────────────────────────────────────────────────────
+// ── Primitive helpers ──────────────────────────────────────────────────────────
 function fillCircleAlpha(
   ctx: CanvasRenderingContext2D,
   cx: number, cy: number, r: number,
@@ -66,61 +71,7 @@ function strokeCircle(
   ctx.stroke();
 }
 
-// ── Drawing ────────────────────────────────────────────────────────────────────
-
-function drawGrenadeTrails(
-  ctx: CanvasRenderingContext2D,
-  paths: RoundReplayData["grenade_paths"],
-  curTick: number,
-  cfg: MapConfig, imgW: number, imgH: number, dispSize: number, offX: number, offY: number,
-) {
-  for (const gren of paths) {
-    const { path, grenade_type } = gren;
-    if (!path.length) continue;
-    const firstT = path[0].tick;
-    const lastT  = path[path.length - 1].tick;
-    if (curTick < firstT || curTick > lastT + TRAIL_FADE_TICKS) continue;
-
-    const colorBase = GREN_COLORS[grenade_type] ?? "rgba(200,200,200,";
-
-    // Collect points up to curTick
-    const pts: [number, number][] = [];
-    for (const pt of path) {
-      if (pt.tick <= curTick) {
-        pts.push(worldToScreen(pt.x, pt.y, cfg, imgW, imgH, dispSize, offX, offY));
-      } else break;
-    }
-    if (!pts.length) continue;
-
-    const inFlight = curTick <= lastT;
-    const trailAlpha = inFlight
-      ? 0.82
-      : Math.max(0, (1 - (curTick - lastT) / TRAIL_FADE_TICKS) * 0.82);
-
-    if (pts.length >= 2) {
-      ctx.save();
-      ctx.globalAlpha = trailAlpha;
-      ctx.strokeStyle = colorBase + "1)";
-      ctx.lineWidth = 2;
-      ctx.lineJoin = "round";
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Dot at current position while in flight
-    if (inFlight) {
-      const [gx, gy] = pts[pts.length - 1];
-      ctx.save();
-      ctx.fillStyle = colorBase + "1)";
-      ctx.beginPath(); ctx.arc(gx, gy, 4, 0, Math.PI * 2); ctx.fill();
-      strokeCircle(ctx, gx, gy, 4, "rgba(255,255,255,0.9)", 1);
-      ctx.restore();
-    }
-  }
-}
+// ── Utility (smokes / molotovs / flashes / grenades) ───────────────────────────
 
 function drawSmokes(
   ctx: CanvasRenderingContext2D,
@@ -132,32 +83,12 @@ function drawSmokes(
   for (const s of smokes) {
     if (curTick < s.start_tick || curTick > s.end_tick) continue;
     const [px, py] = worldToScreen(s.x, s.y, cfg, imgW, imgH, dispSize, offX, offY);
+    // Soft fade at the very start and end so smokes don't pop in/out.
     const duration = Math.max(1, s.end_tick - s.start_tick);
     const age      = curTick - s.start_tick;
-    const fade     = Math.min(1, Math.min(age, duration - age) / (TICKRATE * 2));
-    const alpha    = Math.min(1, fade + 0.3) * 0.61;
-
-    fillCircleAlpha(ctx, px, py, smokePx, "#9ba6b6", alpha);
-    strokeCircle(ctx, px, py, smokePx, "#c3cae1", 2);
-
-    // Duration bar
-    const rem  = Math.max(0, 1 - age / duration);
-    const barW = smokePx * 2;
-    const bx   = px - smokePx;
-    const by   = py + smokePx + 4;
-    ctx.fillStyle = "#343746"; ctx.fillRect(bx, by, barW, 3);
-    ctx.fillStyle = "#afb6d7"; ctx.fillRect(bx, by, Math.max(1, barW * rem), 3);
-
-    // Thrower name
-    if (s.thrower_name) {
-      const short = s.thrower_name.includes(" ")
-        ? s.thrower_name.split(" ").pop()!.slice(0, 10)
-        : s.thrower_name.slice(0, 10);
-      ctx.fillStyle = "#9ba2c3";
-      ctx.font = "10px monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(short, px, by + 12);
-    }
+    const fade     = Math.min(1, Math.min(age, duration - age) / TICKRATE);
+    fillCircleAlpha(ctx, px, py, smokePx, "#b9bfcc", 0.42 * fade + 0.05);
+    strokeCircle(ctx, px, py, smokePx, "rgba(220,224,236,0.55)", 1);
   }
 }
 
@@ -171,21 +102,8 @@ function drawInfernos(
   for (const inf of infernos) {
     if (curTick < inf.start_tick || curTick > inf.end_tick) continue;
     const [px, py] = worldToScreen(inf.x, inf.y, cfg, imgW, imgH, dispSize, offX, offY);
-    const duration = Math.max(1, inf.end_tick - inf.start_tick);
-    const age      = curTick - inf.start_tick;
-    const rem      = Math.max(0, 1 - age / duration);
-    const pulse    = 0.61 + 0.18 * Math.sin(curTick * 0.25);
-
-    fillCircleAlpha(ctx, px, py, infernoPx, "#e4480c", pulse);
-    fillCircleAlpha(ctx, px, py, Math.max(2, infernoPx - 5), "#ff941c", pulse * 0.5);
-    strokeCircle(ctx, px, py, infernoPx, "#ff6c16", 2);
-
-    // Duration bar
-    const barW = infernoPx * 2;
-    const bx   = px - infernoPx;
-    const by   = py + infernoPx + 4;
-    ctx.fillStyle = "#3a2416"; ctx.fillRect(bx, by, barW, 3);
-    ctx.fillStyle = "#ff8a20"; ctx.fillRect(bx, by, Math.max(1, barW * rem), 3);
+    fillCircleAlpha(ctx, px, py, infernoPx, "#f57e2c", 0.55);
+    strokeCircle(ctx, px, py, infernoPx, "rgba(255,138,32,0.85)", 1);
   }
 }
 
@@ -195,85 +113,173 @@ function drawFlashes(
   curTick: number,
   cfg: MapConfig, imgW: number, imgH: number, dispSize: number, offX: number, offY: number,
 ) {
-  const smokePx = worldRToPx(SMOKE_RADIUS_WU, cfg, imgW, dispSize);
+  // Compact flicker: small fading dot, no expanding ring.
+  const visTicks = Math.round(FLASH_VIS_TICKS * 0.5);
   for (const fl of flashes) {
     const age = curTick - fl.tick;
-    if (age < 0 || age > FLASH_VIS_TICKS) continue;
+    if (age < 0 || age > visTicks) continue;
     const [px, py] = worldToScreen(fl.x, fl.y, cfg, imgW, imgH, dispSize, offX, offY);
-    const t      = age / FLASH_VIS_TICKS;
-    const alpha  = (1 - t) * 0.39;
-    const rRing  = Math.max(4, smokePx * 2.60 * (1 + t * 1.2));
-    const rCore  = Math.max(3, smokePx * 0.88 * (1 + t * 0.4));
-    fillCircleAlpha(ctx, px, py, rRing, "#ffffc8", alpha / 3);
-    strokeCircle(ctx, px, py, rRing, "#ffff9a", Math.max(1, Math.round(3 * (1 - t)) + 1));
-    fillCircleAlpha(ctx, px, py, rCore, "#ffff64", alpha);
+    const t     = age / visTicks;
+    const alpha = (1 - t) * 0.55;
+    const r     = 6 + 4 * t;
+    fillCircleAlpha(ctx, px, py, r, "#ffeb6b", alpha);
   }
 }
 
+function drawGrenadeTrails(
+  ctx: CanvasRenderingContext2D,
+  paths: RoundReplayData["grenade_paths"],
+  curTick: number,
+  cfg: MapConfig, imgW: number, imgH: number, dispSize: number, offX: number, offY: number,
+) {
+  for (const gren of paths) {
+    const { path, grenade_type } = gren;
+    if (!path.length) continue;
+    const firstT = path[0].tick;
+    const lastT  = path[path.length - 1].tick;
+    if (curTick < firstT || curTick > lastT + TRAIL_AFTER_TICKS) continue;
+
+    const colorBase = GREN_COLORS[grenade_type] ?? "rgba(200,200,200,";
+
+    // Collect points up to curTick.
+    const pts: [number, number][] = [];
+    for (const pt of path) {
+      if (pt.tick <= curTick) {
+        pts.push(worldToScreen(pt.x, pt.y, cfg, imgW, imgH, dispSize, offX, offY));
+      } else break;
+    }
+    if (!pts.length) continue;
+
+    const inFlight   = curTick <= lastT;
+    const trailAlpha = inFlight ? 0.55 : Math.max(0, (1 - (curTick - lastT) / TRAIL_AFTER_TICKS) * 0.4);
+
+    if (pts.length >= 2 && trailAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = trailAlpha;
+      ctx.strokeStyle = colorBase + "1)";
+      ctx.lineWidth   = 1.5;
+      ctx.lineJoin    = "round";
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (inFlight) {
+      const [gx, gy] = pts[pts.length - 1];
+      ctx.save();
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = colorBase + "1)";
+      ctx.beginPath();
+      ctx.arc(gx, gy, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
+// ── Player rendering ───────────────────────────────────────────────────────────
+
 function drawPlayer(
   ctx: CanvasRenderingContext2D,
-  player: import("./types").PlayerTick,
+  player: PlayerTick,
   tickIdx: number,
   weaponMap: WeaponMap,
   cfg: MapConfig, imgW: number, imgH: number, dispSize: number, offX: number, offY: number,
-  ghost = false,
+  ghost: boolean,
+  highlighted: boolean,
 ) {
-  const { x, y, yaw, health, side, name, inventory, flash_duration } = player;
+  const { x, y, yaw, health, side, inventory, flash_duration } = player;
   const alive   = health > 0;
-  const color   = alive ? (side === "ct" ? CT_COLOR : T_COLOR) : DEAD_COLOR;
-  const r       = alive ? PLAYER_R : Math.max(4, PLAYER_R - 3);
+  const sideCol = side === "ct" ? CT_COLOR : T_COLOR;
   const [px, py] = worldToScreen(x, y, cfg, imgW, imgH, dispSize, offX, offY);
-  const flashed  = alive && flash_duration > 0;
+  const flashed = alive && flash_duration > 0;
 
-  // Directional arrow (alive, not ghost)
-  if (alive && !ghost) {
-    const rad = (yaw * Math.PI) / 180;
-    const dx  =  Math.cos(rad) * ARROW_LEN;
-    const dy  = -Math.sin(rad) * ARROW_LEN;
-    ctx.strokeStyle = color;
-    ctx.lineWidth   = 2;
+  // Dead: small × marker, dim color, no decoration.
+  if (!alive) {
+    const arm = 4;
+    ctx.save();
+    ctx.globalAlpha = ghost ? 0.35 : 0.7;
+    ctx.strokeStyle = highlighted ? FOCAL_COLOR : DEAD_COLOR;
+    ctx.lineWidth = highlighted ? 2 : 1.5;
+    ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(px, py);
-    ctx.lineTo(px + dx, py + dy);
+    ctx.moveTo(px - arm, py - arm); ctx.lineTo(px + arm, py + arm);
+    ctx.moveTo(px + arm, py - arm); ctx.lineTo(px - arm, py + arm);
     ctx.stroke();
+    ctx.restore();
+    return;
   }
 
-  // Body circle
-  if (ghost) {
-    fillCircleAlpha(ctx, px, py, r, color, 0.25);
-    strokeCircle(ctx, px, py, r, "rgba(255,255,255,0.12)", 1);
-  } else {
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill();
-    strokeCircle(ctx, px, py, r, flashed ? "#ffff8c" : WHITE, 1);
+  const r = highlighted ? FOCAL_R : PLAYER_R;
+  const arrowLen = highlighted ? FOCAL_ARROW_LEN : ARROW_LEN;
+
+  // Facing arrow.
+  const rad = (yaw * Math.PI) / 180;
+  const dx  =  Math.cos(rad) * arrowLen;
+  const dy  = -Math.sin(rad) * arrowLen;
+  ctx.save();
+  ctx.globalAlpha = ghost ? 0.35 : 1.0;
+  ctx.strokeStyle = sideCol;
+  ctx.lineWidth   = highlighted ? 2.5 : 1.75;
+  ctx.lineCap     = "round";
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.lineTo(px + dx, py + dy);
+  ctx.stroke();
+  ctx.restore();
+
+  // Focal halo (single soft ring, not three layers).
+  if (highlighted && !ghost) {
+    fillCircleAlpha(ctx, px, py, r + 7, FOCAL_COLOR, 0.18);
+    strokeCircle(ctx, px, py, r + 5, FOCAL_COLOR, 2);
   }
 
-  // Name tag
-  const short = name.includes(" ") ? name.split(" ").pop()!.slice(0, 12) : name.slice(0, 12);
-  ctx.font      = "10px monospace";
-  ctx.textAlign = "center";
-  ctx.fillStyle = ghost ? DIM_COLOR : WHITE;
-  ctx.fillText(short, px, py - r - 5);
+  // Body.
+  ctx.save();
+  ctx.globalAlpha = ghost ? 0.30 : 1.0;
+  ctx.fillStyle = sideCol;
+  ctx.beginPath();
+  ctx.arc(px, py, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 
-  if (alive && !ghost) {
-    // HP bar
-    const bw = 30, bh = 3;
-    const bx = px - bw / 2, by = py + r + 3;
-    ctx.fillStyle = "#2d2d37"; ctx.fillRect(bx, by, bw, bh);
+  // Outline. Subtle for context players, bright for focal, warm for flashed.
+  const outlineColor = highlighted
+    ? FOCAL_COLOR
+    : flashed
+      ? FLASHED_COLOR
+      : "rgba(255,255,255,0.45)";
+  strokeCircle(ctx, px, py, r, outlineColor, highlighted ? 2 : 1);
+
+  // Focal-only HUD: name + HP bar + weapon label.
+  if (highlighted && !ghost) {
+    const name = player.name;
+    const short = name.includes(" ") ? name.split(" ").pop()!.slice(0, 12) : name.slice(0, 12);
+    ctx.font         = "bold 11px monospace";
+    ctx.textAlign    = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle    = FOCAL_COLOR;
+    ctx.fillText(short, px, py - r - 7);
+
+    // Slim HP bar.
+    const bw = 32, bh = 3;
+    const bx = px - bw / 2, by = py + r + 5;
+    ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+    ctx.fillStyle = "#2d2d37";          ctx.fillRect(bx, by, bw, bh);
     const hc = health > 50 ? "#41c841" : health > 25 ? "#c8a528" : "#cd3737";
     ctx.fillStyle = hc;
     ctx.fillRect(bx, by, Math.max(1, (bw * health) / 100), bh);
 
-    // Weapon label
-    const sid    = player.steamid;
-    const wpnMap = weaponMap[sid];
-    const raw    = wpnMap?.[tickIdx] ?? null;
-    const wpn    = raw ? decodeWeapon(raw) : bestWeapon(inventory);
+    // Weapon label.
+    const raw = weaponMap[player.steamid]?.[tickIdx] ?? null;
+    const wpn = raw ? decodeWeapon(raw) : bestWeapon(inventory);
     if (wpn) {
-      ctx.font      = "9px monospace";
+      ctx.font      = "10px monospace";
       ctx.textAlign = "center";
-      ctx.fillStyle = "#aaaac8";
-      ctx.fillText(wpn.slice(0, 14), px, by + bh + 9);
+      ctx.fillStyle = WHITE;
+      ctx.fillText(wpn.slice(0, 14), px, by + bh + 11);
     }
   }
 }
@@ -287,6 +293,7 @@ export interface RadarCanvasProps {
   data: RoundReplayData;
   tickIdx: number;
   weaponMap: WeaponMap;
+  highlightedSteamIds?: string[];
   showLower?: boolean;
   width: number;
   height: number;
@@ -294,7 +301,7 @@ export interface RadarCanvasProps {
 
 export function RadarCanvas({
   mapConfig, radarImage, lowerRadarImage, data, tickIdx, weaponMap,
-  showLower = false, width, height,
+  highlightedSteamIds, showLower = false, width, height,
 }: RadarCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -308,7 +315,6 @@ export function RadarCanvas({
     ctx.fillStyle = "#12121a";
     ctx.fillRect(0, 0, width, height);
 
-    // Compute centered-square layout
     const dispSize = Math.min(width, height);
     const offX     = Math.floor((width  - dispSize) / 2);
     const offY     = Math.floor((height - dispSize) / 2);
@@ -317,34 +323,40 @@ export function RadarCanvas({
     const imgW   = img.naturalWidth  || 1024;
     const imgH   = img.naturalHeight || 1024;
 
-    // Radar image
     ctx.drawImage(img, offX, offY, dispSize, dispSize);
 
     if (!data.tick_list.length) return;
     const curTick = data.tick_list[tickIdx] ?? data.tick_list[0];
 
-    // Grenade trails (under players)
+    // Draw order: utility under players. Focal players drawn last so their HUD
+    // sits on top of any neighboring player's body.
+    drawSmokes  (ctx, data.smokes,        curTick, mapConfig, imgW, imgH, dispSize, offX, offY);
+    drawInfernos(ctx, data.infernos,      curTick, mapConfig, imgW, imgH, dispSize, offX, offY);
     drawGrenadeTrails(ctx, data.grenade_paths, curTick, mapConfig, imgW, imgH, dispSize, offX, offY);
+    drawFlashes (ctx, data.flashes,       curTick, mapConfig, imgW, imgH, dispSize, offX, offY);
 
-    // Smokes
-    drawSmokes(ctx, data.smokes, curTick, mapConfig, imgW, imgH, dispSize, offX, offY);
-
-    // Infernos
-    drawInfernos(ctx, data.infernos, curTick, mapConfig, imgW, imgH, dispSize, offX, offY);
-
-    // Flash detonations
-    drawFlashes(ctx, data.flashes, curTick, mapConfig, imgW, imgH, dispSize, offX, offY);
-
-    // Players
     const frame = data.ticks[tickIdx];
     if (frame) {
+      const focal = new Set((highlightedSteamIds ?? []).map(String));
+      const context: PlayerTick[] = [];
+      const focalPlayers: PlayerTick[] = [];
       for (const player of frame.players) {
+        if (focal.has(String(player.steamid))) focalPlayers.push(player);
+        else context.push(player);
+      }
+      const renderPlayer = (player: PlayerTick, highlighted: boolean) => {
         const ghost = mapConfig.has_lower_level
           && (player.z <= mapConfig.lower_level_max_z) !== showLower;
-        drawPlayer(ctx, player, tickIdx, weaponMap, mapConfig, imgW, imgH, dispSize, offX, offY, ghost);
-      }
+        drawPlayer(
+          ctx, player, tickIdx, weaponMap,
+          mapConfig, imgW, imgH, dispSize, offX, offY,
+          ghost, highlighted,
+        );
+      };
+      for (const p of context) renderPlayer(p, false);
+      for (const p of focalPlayers) renderPlayer(p, true);
     }
-  }, [data, tickIdx, weaponMap, mapConfig, radarImage, lowerRadarImage, showLower, width, height]);
+  }, [data, tickIdx, weaponMap, highlightedSteamIds, mapConfig, radarImage, lowerRadarImage, showLower, width, height]);
 
   return (
     <canvas
