@@ -452,9 +452,9 @@ def _decode_result_json(value) -> dict | None:
 async def get_round_analysis(demo_id: str, round_num: int):
     """Return the user→pro mapping for one round.
 
-    Cached per (game_id, round_num). On cache miss we compute synchronously —
-    the placeholder mapper is fast (one ANN call). The worker also precomputes
-    after import, so user-facing requests usually hit a fresh cache entry."""
+    Cached per (game_id, round_num). On cache miss we compute synchronously
+    with the in-memory original + nav matchers. The worker also precomputes
+    after imports, so user-facing requests usually hit a fresh cache entry."""
     record = await db.get_match_source_record(demo_id)
     if record is None or not record.get("parquet_dir"):
         raise HTTPException(status_code=404, detail="Demo not found or not yet processed")

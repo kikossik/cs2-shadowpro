@@ -1,5 +1,6 @@
 services:
 
+  #
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
@@ -18,6 +19,7 @@ services:
       timeout: 5s
       retries: 10
 
+  #
   resolver:
     build:
       context: ./services/sharecode-resolver
@@ -34,6 +36,7 @@ services:
       retries: 30
       start_period: 30s
 
+  #
   web:
     build: .
     restart: unless-stopped
@@ -58,6 +61,7 @@ services:
       resolver:
         condition: service_healthy
 
+  #
   worker:
     build: .
     restart: unless-stopped
@@ -80,33 +84,24 @@ services:
       resolver:
         condition: service_healthy
 
-  pro-scraper:
-    profiles: [scraper]
+  # Manual tool: scrape/download/ingest pro demos on demand.
+  # Run with:
+  #   docker compose --profile tools run --rm pro-import
+  # Or override the command for a specific map/result page.
+  pro-import:
+    profiles: [tools]
     build:
       context: .
       dockerfile: Dockerfile.scraper
-    restart: unless-stopped
+    restart: "no"
     shm_size: "1gb"
-    command:
-      - sh
-      - -lc
-      - |
-        echo "[pro-scraper] wrapper starting"
-        rm -f /tmp/.X99-lock
-        Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
-        XVFB_PID=$$!
-        export DISPLAY=:99
-        # Wait briefly for Xvfb to come up (no xdpyinfo in image, so just sleep)
-        sleep 1
-        echo "[pro-scraper] Xvfb pid=$$XVFB_PID DISPLAY=$$DISPLAY"
-        PLAYWRIGHT_HEADLESS=0 exec python -u -m backend.pro_scraper
+    command: python -m pipeline.jobs.refresh_pro_corpus --limit 2
     env_file:
       - path: .env
         required: false
     environment:
       DATABASE_URL: postgresql://cs2shadowpro:cs2shadowpro@db/cs2shadowpro
-      PRO_SCRAPER_INTERVAL_SECONDS: "86400"
-      PRO_SCRAPER_LIMIT: "2"
+      PLAYWRIGHT_HEADLESS: "1"
     volumes:
       - ./demos_pro:/app/demos_pro
       - ./parquet_pro:/app/parquet_pro
@@ -115,6 +110,7 @@ services:
       db:
         condition: service_healthy
 
+  #
   frontend:
     build:
       context: .
@@ -124,6 +120,8 @@ services:
       - "4173:80"
     depends_on:
       - web
+
+
 
 volumes:
   db_data:

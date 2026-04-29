@@ -18,15 +18,6 @@ from awpy import Demo
 from backend import config, db
 from backend.round_mapper import DEFAULT_EVENTS, FOCUSED_PLAYER_PROPS, FOCUSED_WORLD_PROPS
 
-PLAYER_PROPS = FOCUSED_PLAYER_PROPS
-
-_TICKS_KEEP = [
-    'round_num', 'tick', 'steamid', 'name', 'side',
-    'X', 'Y', 'Z', 'health', 'place',
-    'yaw', 'pitch', 'inventory', 'flash_duration',
-    'armor_value', 'has_defuser', 'balance', 'zoom_lvl',
-]
-
 
 def _map_name(dem: Demo) -> str:
     try:
@@ -116,7 +107,6 @@ def _match_stats(dem: Demo, steam_id: str) -> dict:
     return stats
 
 
-_PARQUET_FIELDS = ("ticks", "rounds", "kills", "damages", "shots", "bomb", "grenades")
 _MATCH_TYPES = {"unknown", "premier", "competitive", "faceit"}
 
 
