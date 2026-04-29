@@ -5,22 +5,20 @@ Runs in a thread pool (awpy/polars are CPU-bound).
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 
+import awpy.parsers.rounds
+import awpy.parsers.utils
 import polars as pl
 from awpy import Demo
 
 from backend import config, db
-from pipeline.features.extract_windows import extract_match_event_windows
-from pipeline.features.featurize_windows import FEATURE_VERSION, TICK_RATE
-from pipeline.steps.build_artifact import ARTIFACT_VERSION, build_match_artifact
+from backend.round_mapper import DEFAULT_EVENTS, FOCUSED_PLAYER_PROPS, FOCUSED_WORLD_PROPS
 
-PLAYER_PROPS = [
-    'balance', 'armor_value', 'has_defuser', 'flash_duration',
-    'inventory', 'yaw', 'pitch', 'zoom_lvl',
-]
+PLAYER_PROPS = FOCUSED_PLAYER_PROPS
 
 _TICKS_KEEP = [
     'round_num', 'tick', 'steamid', 'name', 'side',
@@ -49,6 +47,11 @@ def _match_stats(dem: Demo, steam_id: str) -> dict:
         ticks = dem.ticks
         user_round_sides: pl.DataFrame | None = None
         if ticks is not None:
+            rename_map = {}
+            if "player_steamid" in ticks.columns and "steamid" not in ticks.columns:
+                rename_map["player_steamid"] = "steamid"
+            if rename_map:
+                ticks = ticks.rename(rename_map)
             user_round_sides = (
                 ticks
                 .filter(pl.col("steamid") == uid)
@@ -113,10 +116,43 @@ def _match_stats(dem: Demo, steam_id: str) -> dict:
     return stats
 
 
-_PARQUET_FIELDS = (
-    "ticks", "rounds", "shots", "smokes", "infernos", "flashes", "grenade_paths",
-)
+_PARQUET_FIELDS = ("ticks", "rounds", "kills", "damages", "shots", "bomb", "grenades")
 _MATCH_TYPES = {"unknown", "premier", "competitive", "faceit"}
+
+
+def _tick_rate_from_header(header: dict) -> int | None:
+    for key in ("tick_rate", "tickrate", "network_protocol_tickrate"):
+        value = header.get(key)
+        if value:
+            try:
+                parsed = int(float(value))
+            except (TypeError, ValueError):
+                continue
+            if parsed > 0:
+                return parsed
+    return None
+
+
+def _frame_or_empty(value) -> pl.DataFrame:
+    return value if isinstance(value, pl.DataFrame) else pl.DataFrame()
+
+
+def _parse_groundup_ticks(dem: Demo) -> pl.DataFrame:
+    ticks = dem.parse_ticks(
+        player_props=FOCUSED_PLAYER_PROPS,
+        other_props=FOCUSED_WORLD_PROPS,
+    )
+    ticks = awpy.parsers.utils.fix_common_names(ticks)
+    ticks = ticks.join(
+        pl.DataFrame({"tick": dem.in_play_ticks}),
+        on="tick",
+        how="semi",
+    )
+    return awpy.parsers.rounds.apply_round_num(
+        df=ticks,
+        rounds_df=dem.rounds,
+        tick_col="tick",
+    ).filter(pl.col("round_num").is_not_null())
 
 
 def _write_parquets(dem: Demo, parquet_dir: Path, demo_id: str) -> None:
@@ -125,47 +161,18 @@ def _write_parquets(dem: Demo, parquet_dir: Path, demo_id: str) -> None:
     def _w(df: pl.DataFrame, field: str) -> None:
         df.write_parquet(parquet_dir / f"{demo_id}_{field}.parquet")
 
-    keep = [c for c in _TICKS_KEEP if c in dem.ticks.columns]
-    _w(dem.ticks.select(keep), "ticks")
-    _w(dem.rounds, "rounds")
-
-    shots_keep = [c for c in ['round_num', 'tick', 'player_steamid', 'weapon']
-                  if c in dem.shots.columns]
-    _w(dem.shots.select(shots_keep), "shots")
-
-    smokes_keep = [c for c in ['round_num', 'start_tick', 'end_tick', 'X', 'Y', 'thrower_name']
-                   if c in dem.smokes.columns]
-    _w(dem.smokes.select(smokes_keep), "smokes")
-
-    infernos_keep = [c for c in ['round_num', 'start_tick', 'end_tick', 'X', 'Y']
-                     if c in dem.infernos.columns]
-    _w(dem.infernos.select(infernos_keep), "infernos")
-
-    gren_keep = [c for c in ['round_num', 'tick', 'entity_id', 'grenade_type', 'X', 'Y']
-                 if c in dem.grenades.columns]
-    grenade_paths = dem.grenades.filter(
-        pl.col('grenade_type') != 'CDecoyProjectile'
-    ).select(gren_keep)
-    _w(grenade_paths, "grenade_paths")
-
-    flash_raw = dem.grenades.filter(pl.col('grenade_type') == 'CFlashbangProjectile')
-    if flash_raw.height > 0:
-        flashes = (
-            flash_raw
-            .sort('tick')
-            .group_by('entity_id')
-            .last()
-            .select([c for c in ['round_num', 'tick', 'X', 'Y'] if c in flash_raw.columns])
-        )
-    else:
-        flashes = pl.DataFrame(schema={
-            'round_num': pl.UInt32, 'tick': pl.Int32,
-            'X': pl.Float32, 'Y': pl.Float32,
-        })
-    _w(flashes, "flashes")
+    _w(_parse_groundup_ticks(dem), "ticks")
+    _w(_frame_or_empty(dem.rounds), "rounds")
+    _w(_frame_or_empty(dem.kills), "kills")
+    _w(_frame_or_empty(dem.damages), "damages")
+    _w(_frame_or_empty(dem.shots), "shots")
+    _w(_frame_or_empty(dem.bomb), "bomb")
+    _w(_frame_or_empty(dem.grenades), "grenades")
+    with (parquet_dir / f"{demo_id}_header.json").open("w", encoding="utf-8") as fh:
+        json.dump(dem.header, fh, default=str)
 
 
-async def _save_match(demo_id: str, game_kwargs: dict, windows: list[dict]) -> None:
+async def _save_match(demo_id: str, game_kwargs: dict) -> None:
     # process_demo runs in a ThreadPoolExecutor via asyncio.run(), which creates a new
     # event loop. The global db._pool was created in FastAPI's main event loop and
     # cannot be used from a different loop, so we create a fresh pool here.
@@ -175,7 +182,6 @@ async def _save_match(demo_id: str, game_kwargs: dict, windows: list[dict]) -> N
     db._pool = pool
     try:
         await db.upsert_user_game(game_id=demo_id, **game_kwargs)
-        await db.upsert_event_windows_batch(windows)
     finally:
         db._pool = orig_pool
         await pool.close()
@@ -188,13 +194,17 @@ def process_demo(
     share_code: str | None = None,
     match_type: str = "unknown",
 ) -> dict:
-    """Parse a demo, write Parquet files, build artifact, upsert the user game row."""
+    """Parse a demo, write groundup-compatible Parquet files, upsert the user game row."""
     match_type = (match_type or "unknown").strip().lower()
     if match_type not in _MATCH_TYPES:
         match_type = "unknown"
 
     dem = Demo(path=str(demo_path))
-    dem.parse(player_props=PLAYER_PROPS)
+    dem.parse(
+        events=DEFAULT_EVENTS,
+        player_props=FOCUSED_PLAYER_PROPS,
+        other_props=FOCUSED_WORLD_PROPS,
+    )
 
     parquet_dir = config.PARQUET_USER_DIR / steam_id / demo_id
     _write_parquets(dem, parquet_dir, demo_id)
@@ -205,14 +215,6 @@ def process_demo(
     rounds = dem.rounds if dem.rounds is not None else pl.DataFrame()
 
     try:
-        artifact_path = build_match_artifact(
-            source_type="user",
-            source_match_id=demo_id,
-            parquet_dir=parquet_dir,
-            stem=demo_id,
-            map_name=map_name,
-            steam_id=steam_id,
-        )
         ct_round_wins = int((rounds["winner"] == "ct").sum()) if rounds.height > 0 and "winner" in rounds.columns else None
         t_round_wins  = int((rounds["winner"] == "t").sum())  if rounds.height > 0 and "winner" in rounds.columns else None
 
@@ -223,14 +225,11 @@ def process_demo(
             "share_code":             share_code,
             "match_date":             match_date,
             "parquet_dir":            str(parquet_dir),
-            "artifact_path":          artifact_path,
             "demo_path":              str(demo_path),
             "round_count":            stats.get("round_count"),
             "ct_round_wins":          ct_round_wins,
             "t_round_wins":           t_round_wins,
-            "tick_rate":              TICK_RATE,
-            "artifact_version":       ARTIFACT_VERSION,
-            "window_feature_version": FEATURE_VERSION,
+            "tick_rate":              _tick_rate_from_header(dem.header),
             "user_side_first":        stats.get("user_side_first"),
             "user_rounds_won":        stats.get("score_ct"),
             "user_rounds_lost":       stats.get("score_t"),
@@ -240,15 +239,7 @@ def process_demo(
             "user_assists":           stats.get("assists"),
             "user_hs_pct":            stats.get("hs_pct"),
         }
-        windows = extract_match_event_windows(
-            source_type="user",
-            source_match_id=demo_id,
-            parquet_dir=parquet_dir,
-            stem=demo_id,
-            map_name=map_name,
-            steam_id=steam_id,
-        )
-        asyncio.run(_save_match(demo_id, game_kwargs, windows))
+        asyncio.run(_save_match(demo_id, game_kwargs))
     except Exception:
         shutil.rmtree(parquet_dir, ignore_errors=True)
         raise
@@ -256,6 +247,6 @@ def process_demo(
     return {
         "demo_id":       demo_id,
         "map":           map_name,
-        "artifact_path": artifact_path,
+        "parquet_dir":   str(parquet_dir),
         **{k: v for k, v in stats.items()},
     }

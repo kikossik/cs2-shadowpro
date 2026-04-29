@@ -2,7 +2,6 @@
 -- Run: psql -d <db_name> -f schema.sql
 
 CREATE SCHEMA IF NOT EXISTS shadowpro;
-CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 SET search_path TO shadowpro, public;
 
 -- Maps (reference + coord config)
@@ -50,10 +49,7 @@ CREATE TABLE IF NOT EXISTS games (
 
     demo_stem        TEXT NOT NULL,
     parquet_dir      TEXT,
-    artifact_path    TEXT,
-    artifact_version TEXT,
     parser_version   TEXT,
-    feature_version  TEXT,
     tick_rate        SMALLINT CHECK (tick_rate IS NULL OR tick_rate > 0),
 
     round_count      SMALLINT CHECK (round_count IS NULL OR round_count >= 0),
@@ -130,40 +126,6 @@ CREATE INDEX IF NOT EXISTS games_status_idx
 CREATE INDEX IF NOT EXISTS games_external_idx
     ON games (external_match_id)
     WHERE source_type = 'pro';
-
--- Event windows: retrieval corpus for situation matching
-CREATE TABLE IF NOT EXISTS event_windows (
-    window_id       TEXT PRIMARY KEY,
-    game_id         TEXT        NOT NULL REFERENCES games (game_id) ON DELETE CASCADE,
-    map_name        TEXT        NOT NULL REFERENCES maps (map_name),
-    round_num       SMALLINT    NOT NULL CHECK (round_num > 0),
-    start_tick      INTEGER     NOT NULL CHECK (start_tick >= 0),
-    anchor_tick     INTEGER     NOT NULL CHECK (anchor_tick >= 0),
-    end_tick        INTEGER     NOT NULL CHECK (end_tick >= 0),
-    side_to_query   TEXT        CHECK (side_to_query IN ('ct', 't')),
-    phase           TEXT,
-    site            TEXT,
-    anchor_kind     TEXT,
-    alive_ct        SMALLINT    CHECK (alive_ct IS NULL OR alive_ct >= 0),
-    alive_t         SMALLINT    CHECK (alive_t IS NULL OR alive_t >= 0),
-    feature_version TEXT        NOT NULL,
-    feature_path    TEXT        NOT NULL,
-    embedding       vector(54),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
-    CONSTRAINT event_windows_tick_order CHECK (
-        start_tick <= anchor_tick AND anchor_tick <= end_tick
-    )
-);
-
-CREATE INDEX IF NOT EXISTS event_windows_game_idx
-    ON event_windows (game_id);
-CREATE INDEX IF NOT EXISTS event_windows_filter_idx
-    ON event_windows (map_name, feature_version);
-CREATE INDEX IF NOT EXISTS event_windows_anchor_idx
-    ON event_windows (map_name, round_num, anchor_tick);
-CREATE INDEX IF NOT EXISTS event_windows_embed_idx
-    ON event_windows USING hnsw (embedding vector_cosine_ops);
 
 -- Round analysis cache
 CREATE TABLE IF NOT EXISTS round_analysis_cache (

@@ -19,7 +19,6 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from backend import config, db
 from backend.log import get_logger
-from pipeline.features.featurize_windows import TICK_RATE
 from backend.round_analysis_service import (
     compute_and_cache_round,
     normalize_round_analysis_result,
@@ -222,20 +221,51 @@ async def import_status(job_id: str):
 
 # ── Round replay ───────────────────────────────────────────────────────────────
 
-def _read_round_replay_payload(demo_id: str, round_num: int, parquet_dir: str, map_name: str) -> dict:
+def _empty_utility_frame(kind: str) -> pl.DataFrame:
+    schemas = {
+        "smokes": {"round_num": pl.Int64, "start_tick": pl.Int64, "end_tick": pl.Int64, "X": pl.Float64, "Y": pl.Float64, "thrower_name": pl.Utf8},
+        "infernos": {"round_num": pl.Int64, "start_tick": pl.Int64, "end_tick": pl.Int64, "X": pl.Float64, "Y": pl.Float64},
+        "flashes": {"round_num": pl.Int64, "tick": pl.Int64, "X": pl.Float64, "Y": pl.Float64},
+        "grenades": {"round_num": pl.Int64, "tick": pl.Int64, "entity_id": pl.Int64, "grenade_type": pl.Utf8, "X": pl.Float64, "Y": pl.Float64},
+    }
+    return pl.DataFrame(schema=schemas[kind])
+
+
+def _read_round_replay_payload(
+    demo_id: str,
+    round_num: int,
+    parquet_dir: str,
+    map_name: str,
+    tick_rate: int | None,
+) -> dict:
     base = Path(parquet_dir)
     stem = demo_id
+    effective_tick_rate = int(tick_rate or 128)
 
-    def _read(field: str) -> pl.DataFrame:
-        return pl.read_parquet(base / f"{stem}_{field}.parquet")
+    def _read(field: str, *, optional: bool = False) -> pl.DataFrame:
+        for candidate in (
+            base / f"{stem}_{field}.parquet",
+            base / f"{Path(stem).stem}_{field}.parquet",
+            base / f"{field}.parquet",
+        ):
+            if candidate.exists():
+                return pl.read_parquet(candidate)
+        if optional:
+            return pl.DataFrame()
+        raise FileNotFoundError(str(base / f"{stem}_{field}.parquet"))
 
     ticks_all   = _read("ticks")
     rounds_all  = _read("rounds")
-    shots_all   = _read("shots")
-    smokes_all  = _read("smokes")
-    infernos_all = _read("infernos")
-    flashes_all = _read("flashes")
-    grens_all   = _read("grenade_paths")
+    shots_all   = _read("shots", optional=True)
+    grenades_all = _read("grenades", optional=True)
+    smokes_all   = _empty_utility_frame("smokes")
+    infernos_all = _empty_utility_frame("infernos")
+    flashes_all  = _empty_utility_frame("flashes")
+    grens_all = (
+        grenades_all
+        if {"round_num", "tick", "entity_id", "grenade_type", "X", "Y"}.issubset(grenades_all.columns)
+        else _empty_utility_frame("grenades")
+    )
 
     rn = round_num
     r_rounds = rounds_all.filter(pl.col('round_num') == rn)
@@ -246,10 +276,14 @@ def _read_round_replay_payload(demo_id: str, round_num: int, parquet_dir: str, m
         else (int(raw_ticks['tick'].min()) if raw_ticks.height > 0 else 0)
     )
 
-    round_meta = _build_round_meta(rounds_all, r_rounds, rn, freeze_end)
+    round_meta = _build_round_meta(rounds_all, r_rounds, rn, freeze_end, effective_tick_rate)
 
     ticks    = raw_ticks.filter(pl.col('tick') >= freeze_end).sort('tick')
-    shots    = shots_all.filter((pl.col('round_num') == rn) & (pl.col('tick') >= freeze_end))
+    shots = (
+        shots_all.filter((pl.col('round_num') == rn) & (pl.col('tick') >= freeze_end))
+        if {"round_num", "tick"}.issubset(shots_all.columns)
+        else pl.DataFrame()
+    )
     smokes   = smokes_all.filter(
         (pl.col('round_num') == rn)
         & ((pl.col('end_tick').is_null()) | (pl.col('end_tick') >= freeze_end))
@@ -287,7 +321,7 @@ def _read_round_replay_payload(demo_id: str, round_num: int, parquet_dir: str, m
     shots_payload = [
         {
             "tick":           int(row['tick']),
-            "player_steamid": str(row.get('player_steamid') or ''),
+            "player_steamid": str(row.get('player_steamid') or row.get('steamid') or ''),
             "weapon":         str(row.get('weapon') or ''),
         }
         for row in shots.iter_rows(named=True)
@@ -354,6 +388,7 @@ def _build_round_meta(
     r_rounds: pl.DataFrame,
     round_num: int,
     freeze_end: int,
+    tick_rate: int,
 ) -> dict:
     """Per-round metadata: scoreline going-in, outcome, bomb plant."""
     cols = set(rounds_all.columns)
@@ -377,7 +412,7 @@ def _build_round_meta(
         if plant is not None:
             plant_tick = int(plant)
             outcome["bomb_plant_tick"] = plant_tick
-            outcome["bomb_plant_offset_s"] = round(max(0, plant_tick - freeze_end) / TICK_RATE, 1)
+            outcome["bomb_plant_offset_s"] = round(max(0, plant_tick - freeze_end) / tick_rate, 1)
 
         for key in ("official_end", "end"):
             if key in cols and row.get(key) is not None:
@@ -397,10 +432,10 @@ async def get_round_replay(demo_id: str, round_num: int):
     if row is None:
         raise HTTPException(status_code=404, detail="Demo not found or not yet processed")
     try:
-        parquet_dir, map_name = row
-        return _read_round_replay_payload(demo_id, round_num, parquet_dir, map_name)
+        parquet_dir, map_name, tick_rate = row
+        return _read_round_replay_payload(demo_id, round_num, parquet_dir, map_name, tick_rate)
     except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"Parquet file missing: {exc.filename}") from exc
+        raise HTTPException(status_code=404, detail=f"Parquet file missing: {exc}") from exc
 
 
 # ── Round analysis ─────────────────────────────────────────────────────────────

@@ -127,7 +127,7 @@ export function Viewer({
       .then((d: RoundReplayData) => { if (!active) return; setData(d); setLoading(false); })
       .catch(e => { if (!active) return; setError(String(e)); setLoading(false); });
 
-    fetch(`/api/round-analysis/${encodeURIComponent(matchId)}/${roundNum}?logic=both`)
+    fetch(`/api/round-analysis/${encodeURIComponent(matchId)}/${roundNum}`)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((payload: RoundAnalysisResponse) => { if (active) setAnalysis(payload); })
       .catch(() => { if (active) setAnalysis(null); });
@@ -201,6 +201,8 @@ export function Viewer({
 
   const analysisResult = analysis?.result ?? null;
   const bestMatch = analysisResult?.best_match ?? null;
+  const originalMatch = analysisResult?.original ?? null;
+  const navMatch = analysisResult?.nav ?? null;
 
   // Pro replay loads as soon as we know which pro round to fetch.
   useEffect(() => {
@@ -255,10 +257,10 @@ export function Viewer({
       ? outcome.winner_side === userSide
       : null;
 
-  // Per-player mapping is not produced by the placeholder mapper; highlight only
-  // the user's own steam id on their side, and nothing on the pro side.
   const userHighlightedSteamIds = bestMatch ? [steamId] : [];
-  const proHighlightedSteamIds: string[]  = [];
+  const proHighlightedSteamIds = bestMatch?.matched_pro_steamid
+    ? [String(bestMatch.matched_pro_steamid)]
+    : [];
 
   return (
     <div className="app" style={{ background: theme.bg, color: theme.ink, fontFamily: theme.fontHead }}>
@@ -388,11 +390,15 @@ export function Viewer({
           <div className="pane pro">
             <div className="pane-head" style={{ borderColor: theme.border }}>
               <div className="pane-head-left">
-                <div className="pane-tag" style={{ color: theme.dim }}>MATCH · HLTV CORPUS</div>
-                <div className="pane-label" style={{ color: theme.accent, fontFamily: theme.fontHead }}>PRO MATCH</div>
+                <div className="pane-tag" style={{ color: theme.dim }}>
+                  {bestMatch ? bestMatch.logic.toUpperCase() : "MATCH"} · HLTV CORPUS
+                </div>
+                <div className="pane-label" style={{ color: theme.accent, fontFamily: theme.fontHead }}>
+                  {bestMatch?.matched_pro_player ?? "PRO MATCH"}
+                </div>
                 <div className="pane-sub" style={{ color: theme.dim }}>
                   {bestMatch
-                    ? `${bestMatch.map.display} · round ${bestMatch.round_num}`
+                    ? `${bestMatch.map?.display ?? bestMatch.map_name ?? "map"} · round ${bestMatch.round_num}`
                     : "no pro round mapped"}
                 </div>
               </div>
@@ -511,7 +517,7 @@ export function Viewer({
           {bestMatch && (
             <div className="why-note-box" style={{ borderColor: theme.border, marginTop: 12 }}>
               <div className="why-note-tag" style={{ color: theme.dim, fontFamily: theme.fontMono }}>
-                PRO MATCH · {Math.round(bestMatch.score * 100)}%
+                BEST PRO MATCH · {bestMatch.logic.toUpperCase()} · {Math.round(bestMatch.score * 100)}%
               </div>
               <div style={{ display: "grid", gap: 4, fontFamily: theme.fontMono, fontSize: 11 }}>
                 <div style={{ color: theme.ink }}>
@@ -519,7 +525,33 @@ export function Viewer({
                 </div>
                 <div style={{ color: theme.dim }}>
                   {bestMatch.event_name ?? "HLTV corpus"} · round {bestMatch.round_num}
+                  {bestMatch.matched_pro_player ? ` · ${bestMatch.matched_pro_player}` : ""}
                 </div>
+                {bestMatch.break_event_label && (
+                  <div style={{ color: theme.dim }}>
+                    {bestMatch.break_event_label}
+                    {bestMatch.break_time_sec != null ? ` @ ${bestMatch.break_time_sec.toFixed(1)}s` : ""}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(originalMatch || navMatch) && (
+            <div className="why-note-box" style={{ borderColor: theme.border, marginTop: 12 }}>
+              <div className="why-note-tag" style={{ color: theme.dim, fontFamily: theme.fontMono }}>
+                MATCH LOGIC
+              </div>
+              <div style={{ display: "grid", gap: 6, fontFamily: theme.fontMono, fontSize: 11 }}>
+                {[originalMatch, navMatch].filter(Boolean).map((m) => (
+                  <div key={m!.logic} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ color: m!.logic === bestMatch?.logic ? theme.accent : theme.dim }}>
+                      {m!.logic.toUpperCase()}
+                      {m!.matched_pro_player ? ` · ${m!.matched_pro_player}` : ""}
+                    </span>
+                    <span style={{ color: theme.ink }}>{Math.round(m!.score * 100)}%</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

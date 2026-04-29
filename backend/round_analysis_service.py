@@ -30,11 +30,12 @@ def normalize_round_analysis_result(result: dict | None) -> dict | None:
     if result is None:
         return None
     payload = dict(result)
-    best = payload.get("best_match")
-    if best is not None and best.get("map") is None:
-        best = dict(best)
-        best["map"] = _map_display(best.get("map_name"))
-        payload["best_match"] = best
+    for key in ("best_match", "original", "nav"):
+        side = payload.get(key)
+        if side is not None and side.get("map") is None:
+            side = dict(side)
+            side["map"] = _map_display(side.get("map_name"))
+            payload[key] = side
     return payload
 
 
@@ -47,11 +48,14 @@ async def compute_and_cache_round(
     Raises on error; the caller is responsible for storing an error row if
     needed.
     """
-    best = await map_user_round_to_pro_round(demo_id, round_num)
-    payload = {
-        "best_match": best,
-        "query": {"demo_id": demo_id, "round_num": round_num},
-    }
+    payload = await map_user_round_to_pro_round(demo_id, round_num)
+    if payload is None:
+        payload = {
+            "query": {"demo_id": demo_id, "round_num": round_num},
+            "best_match": None,
+            "original": None,
+            "nav": None,
+        }
     await db.upsert_round_analysis_result(
         demo_id=demo_id,
         round_num=round_num,

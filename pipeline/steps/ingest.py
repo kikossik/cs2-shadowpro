@@ -2,7 +2,7 @@
 
 Ingest flow:
   1. _parse_ingest_sync runs in a ProcessPoolExecutor (off the event loop):
-       parse demo → write 7 parquets → build artifact → extract event windows
+       parse demo → write 7 groundup-compatible parquets
   2. ingest_pro_demo receives the plain-dict result and does async DB upserts.
 
 Keeping CPU-heavy work in a subprocess means:
@@ -23,12 +23,10 @@ from awpy import Demo
 
 from backend import config, db
 from backend.log import get_logger
-from backend.processing import PLAYER_PROPS, _map_name, _write_parquets
+from backend.processing import _map_name, _tick_rate_from_header, _write_parquets
+from backend.round_mapper import DEFAULT_EVENTS, FOCUSED_PLAYER_PROPS, FOCUSED_WORLD_PROPS
 
 log = get_logger("INGEST")
-from pipeline.features.extract_windows import extract_match_event_windows
-from pipeline.features.featurize_windows import FEATURE_VERSION, TICK_RATE
-from pipeline.steps.build_artifact import ARTIFACT_VERSION, build_match_artifact
 
 VALID_MAPS = {
     "de_ancient", "de_anubis", "de_dust2",
@@ -47,12 +45,17 @@ def _parse_ingest_sync(demo_path: str, parquet_dir: str, match_id: str) -> dict:
     parquet_dir_path = Path(parquet_dir)
 
     dem = Demo(path=demo_path)
-    dem.parse(player_props=PLAYER_PROPS)
+    dem.parse(
+        events=DEFAULT_EVENTS,
+        player_props=FOCUSED_PLAYER_PROPS,
+        other_props=FOCUSED_WORLD_PROPS,
+    )
 
     map_name = _map_name(dem)
     if map_name not in VALID_MAPS:
         raise ValueError(f"map {map_name!r} not in competitive pool — skipping")
 
+    tick_rate = _tick_rate_from_header(dem.header)
     _write_parquets(dem, parquet_dir_path, match_id)
     del dem  # free before reading parquets
 
@@ -64,29 +67,12 @@ def _parse_ingest_sync(demo_path: str, parquet_dir: str, match_id: str) -> dict:
     round_count = rounds_df.height
     del rounds_df
 
-    artifact_path = build_match_artifact(
-        source_type="pro",
-        source_match_id=match_id,
-        parquet_dir=parquet_dir_path,
-        stem=match_id,
-        map_name=map_name,
-    )
-
-    windows = extract_match_event_windows(
-        source_type="pro",
-        source_match_id=match_id,
-        parquet_dir=parquet_dir_path,
-        stem=match_id,
-        map_name=map_name,
-    )
-
     return {
         "map_name":       map_name,
         "round_count":    round_count,
         "ct_round_wins":  ct_round_wins,
         "t_round_wins":   t_round_wins,
-        "artifact_path":  str(artifact_path),
-        "windows":        windows,
+        "tick_rate":      tick_rate,
     }
 
 
@@ -97,7 +83,7 @@ async def ingest_pro_demo(
     executor: ProcessPoolExecutor | None = None,
     **meta,
 ) -> dict:
-    """Parse demo, write Parquets, build artifact, upsert flat game records.
+    """Parse demo, write Parquets, upsert flat game records.
 
     Pass a shared ProcessPoolExecutor to avoid spawning a new process per call.
     If omitted, a temporary single-use executor is created automatically.
@@ -127,10 +113,8 @@ async def ingest_pro_demo(
 
     map_name      = parsed["map_name"]
     round_count   = parsed["round_count"]
-    artifact_path = parsed["artifact_path"]
-    windows       = parsed["windows"]
 
-    log.info("%s map=%s rounds=%d windows=%d", match_id, map_name, round_count, len(windows))
+    log.info("%s map=%s rounds=%d", match_id, map_name, round_count)
 
     match_date = meta.get("match_date")
     if isinstance(match_date, str):
@@ -152,27 +136,21 @@ async def ingest_pro_demo(
             team2_name=team2_name,
             match_date=match_date,
             parquet_dir=str(parquet_dir),
-            artifact_path=artifact_path,
             ct_round_wins=parsed["ct_round_wins"],
             t_round_wins=parsed["t_round_wins"],
             round_count=round_count,
             demo_path=str(demo_path),
             map_number=meta.get("map_number"),
-            tick_rate=TICK_RATE,
+            tick_rate=parsed.get("tick_rate"),
             parser_version=_AWPY_VERSION,
-            artifact_version=ARTIFACT_VERSION,
-            window_feature_version=FEATURE_VERSION,
         )
-        await db.upsert_event_windows_batch(windows)
     except Exception:
         shutil.rmtree(parquet_dir, ignore_errors=True)
         raise
 
-    log.info("done %s: artifact=%s", match_id, artifact_path)
+    log.info("done %s: parquet=%s", match_id, parquet_dir)
     return {
         "match_id":      match_id,
         "map":           map_name,
         "parquet_dir":   str(parquet_dir),
-        "artifact_path": artifact_path,
-        "windows":       len(windows),
     }

@@ -3,8 +3,8 @@
 Chain:
   scrape HLTV -> download archive -> extract map demos -> ingest pro demo
 
-Each successful ingest writes parquets, builds the match artifact, and indexes
-event windows through pipeline.steps.ingest.ingest_pro_demo().
+Each successful ingest writes the groundup-compatible parquet set through
+pipeline.steps.ingest.ingest_pro_demo().
 """
 from __future__ import annotations
 

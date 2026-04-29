@@ -96,23 +96,29 @@ export interface RoundReplayData {
 export interface SimilarityQuery {
   demo_id: string;
   round_num: number;
-  anchor_tick: number;
-  start_tick: number;
-  end_tick: number;
-  phase: string | null;
-  site: string | null;
-  side_to_query: "ct" | "t" | null;
+  anchor_tick?: number;
+  start_tick?: number;
+  end_tick?: number;
+  phase?: string | null;
+  site?: string | null;
+  side_to_query?: "ct" | "t" | null;
   time_since_freeze_end_s?: number | null;
 }
 
-export interface BestMatch {
+export interface MatchSide {
+  logic: "original" | "nav";
   source_match_id: string;
   round_num: number;
   score: number;
-  best_window_score?: number;
+  matched_pro_steamid?: number;
+  matched_pro_player?: string;
   coverage?: number;
-  supporting_window_hits?: number;
-  matched_query_windows?: number;
+  longest_streak?: number;
+  window_count?: number;
+  mean_round_similarity?: number;
+  mean_non_user_alignment?: number;
+  mean_context_match?: number;
+  mean_user_pro_difference?: number;
   map_name: string | null;
   map: { key: string; name: string; display: string };
   event_name: string | null;
@@ -121,13 +127,23 @@ export interface BestMatch {
   team_ct: string | null;
   team_t: string | null;
   match_date: string | null;
+  shared_route_steps?: number;
+  matched_prefix_duration_sec?: number;
+  break_event_label?: string;
+  break_event_type?: string;
+  break_time_sec?: number;
+  divergence_start_sec?: number | null;
+  divergence_start_tick?: number | null;
+  divergence_end_sec?: number | null;
 }
 
 export type RoundAnalysisStatus = "pending" | "done" | "error";
 
 export interface RoundAnalysisResult {
   query: SimilarityQuery;
-  best_match: BestMatch | null;
+  best_match: MatchSide | null;
+  original: MatchSide | null;
+  nav: MatchSide | null;
 }
 
 export interface RoundAnalysisResponse {

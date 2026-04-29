@@ -53,5 +53,6 @@ Thumbs.db
 
 # Local assistant/tooling state
 .claude/settings.local.json
+.claude/
 .codex
 architecture/

@@ -8,7 +8,6 @@ import json
 import re
 
 from backend import config
-from pipeline.features.vectorize import VECTOR_DIM
 
 _pool: asyncpg.Pool | None = None
 _MATCH_TYPES = {"unknown", "premier", "competitive", "faceit", "hltv"}
@@ -208,7 +207,7 @@ async def upsert_game(game_id: str, **kwargs) -> None:
             payload[key] = _coerce_timestamptz(payload[key])
     if "match_type" in payload:
         payload["match_type"] = _coerce_match_type(payload["match_type"])
-    for key in ("parquet_dir", "artifact_path"):
+    for key in ("parquet_dir",):
         if payload.get(key) is not None:
             payload[key] = config.to_managed_path(payload[key])
     payload["updated_at"] = datetime.now(timezone.utc)
@@ -240,16 +239,13 @@ async def upsert_pro_game(
     team2_name: str | None,
     match_date,
     parquet_dir: str,
-    artifact_path: str | None,
     ct_round_wins: int | None,
     t_round_wins: int | None,
     round_count: int | None,
     demo_path: str | None = None,
     map_number: int | None = None,
-    tick_rate: int = 64,
+    tick_rate: int | None = None,
     parser_version: str | None = None,
-    artifact_version: str | None = None,
-    window_feature_version: str | None = None,
 ) -> None:
     """Upsert one HLTV-sourced map demo into the flat games table."""
     external_match_id = str(hltv_match_id or game_id.split("_", 1)[0])
@@ -272,14 +268,11 @@ async def upsert_pro_game(
         map_number=map_number,
         demo_stem=game_id,
         parquet_dir=str(parquet_dir),
-        artifact_path=artifact_path,
         ct_round_wins=ct_round_wins,
         t_round_wins=t_round_wins,
         round_count=round_count,
         tick_rate=tick_rate,
         parser_version=parser_version,
-        artifact_version=artifact_version,
-        feature_version=window_feature_version,
         ingest_status="ready",
         ingest_error=None,
         ingested_at=datetime.now(timezone.utc),
@@ -305,14 +298,11 @@ async def upsert_user_game(
     share_code: str | None = None,
     match_date=None,
     parquet_dir: str,
-    artifact_path: str | None,
     demo_path: str | None = None,
     round_count: int | None,
     ct_round_wins: int | None = None,
     t_round_wins: int | None = None,
-    tick_rate: int = 64,
-    artifact_version: str | None = None,
-    window_feature_version: str | None = None,
+    tick_rate: int | None = None,
     user_side_first: str | None = None,
     user_result: str | None = None,
     user_rounds_won: int | None = None,
@@ -331,13 +321,10 @@ async def upsert_user_game(
         played_at=match_date,
         demo_stem=game_id,
         parquet_dir=str(parquet_dir),
-        artifact_path=artifact_path,
         ct_round_wins=ct_round_wins,
         t_round_wins=t_round_wins,
         round_count=round_count,
         tick_rate=tick_rate,
-        artifact_version=artifact_version,
-        feature_version=window_feature_version,
         ingest_status="ready",
         ingest_error=None,
         ingested_at=datetime.now(timezone.utc),
@@ -400,15 +387,15 @@ async def delete_user_game(game_id: str) -> None:
     )
 
 
-async def get_match_parquet_dir(demo_id: str) -> tuple[str, str] | None:
-    """Return (parquet_dir, map_name) for a user or pro game."""
+async def get_match_parquet_dir(demo_id: str) -> tuple[str, str, int | None] | None:
+    """Return (parquet_dir, map_name, tick_rate) for a user or pro game."""
     pool = await get_pool()
     row = await pool.fetchrow(
-        "SELECT parquet_dir, map_name FROM games WHERE game_id = $1",
+        "SELECT parquet_dir, map_name, tick_rate FROM games WHERE game_id = $1",
         demo_id,
     )
     if row and row["parquet_dir"]:
-        return config.resolve_managed_path(row["parquet_dir"]), row["map_name"]
+        return config.resolve_managed_path(row["parquet_dir"]), row["map_name"], row["tick_rate"]
     return None
 
 
@@ -430,7 +417,6 @@ async def get_match_source_records(match_ids: list[str]) -> dict[str, dict]:
             g.game_id        AS source_match_id,
             g.source_url     AS hltv_url,
             g.played_at      AS match_date,
-            g.feature_version AS window_feature_version,
             e.event_name,
             t1.team_name     AS team1_name,
             t2.team_name     AS team2_name,
@@ -445,7 +431,7 @@ async def get_match_source_records(match_ids: list[str]) -> dict[str, dict]:
         match_ids,
     )
     return {
-        row["source_match_id"]: _normalize_path_fields(dict(row), "parquet_dir", "artifact_path")
+        row["source_match_id"]: _normalize_path_fields(dict(row), "parquet_dir")
         for row in rows
     }
 
@@ -468,7 +454,6 @@ async def get_pro_matches(limit: int | None = None) -> list[dict]:
             g.game_id        AS match_id,
             g.map_name,
             g.parquet_dir,
-            g.artifact_path,
             g.played_at      AS match_date,
             e.event_name,
             g.source_url     AS hltv_url,
@@ -479,6 +464,7 @@ async def get_pro_matches(limit: int | None = None) -> list[dict]:
             g.ct_round_wins,
             g.t_round_wins,
             g.round_count,
+            g.tick_rate,
             g.ingested_at
         FROM games g
         LEFT JOIN events e ON e.event_id = g.event_id
@@ -492,236 +478,7 @@ async def get_pro_matches(limit: int | None = None) -> list[dict]:
         query += " LIMIT $1"
         params = (limit,)
     rows = await pool.fetch(query, *params)
-    return [_normalize_path_fields(dict(r), "parquet_dir", "artifact_path") for r in rows]
-
-
-# ── Artifact path helpers ──────────────────────────────────────────────────────
-
-async def set_match_artifact_path(source_type: str, source_match_id: str, artifact_path: str) -> None:
-    """Store the current match artifact path on the game row."""
-    from pipeline.steps.build_artifact import ARTIFACT_VERSION
-    pool = await get_pool()
-    await pool.execute(
-        """
-        UPDATE games
-        SET artifact_path = $1,
-            artifact_version = $2,
-            updated_at = NOW()
-        WHERE source_type = $3 AND game_id = $4
-        """,
-        config.to_managed_path(artifact_path),
-        ARTIFACT_VERSION,
-        source_type,
-        source_match_id,
-    )
-
-
-# ── Event windows ──────────────────────────────────────────────────────────────
-
-def _format_embedding(embedding: list[float]) -> str:
-    return "[" + ",".join(str(v) for v in embedding) + "]"
-
-
-async def count_event_windows(
-    game_id: str,
-    *,
-    feature_version: str | None = None,
-) -> int:
-    """Return the number of indexed event windows for one game."""
-    pool = await get_pool()
-    if feature_version is None:
-        return int(await pool.fetchval(
-            "SELECT COUNT(*) FROM event_windows WHERE game_id = $1",
-            game_id,
-        ) or 0)
-    return int(await pool.fetchval(
-        "SELECT COUNT(*) FROM event_windows WHERE game_id = $1 AND feature_version = $2",
-        game_id,
-        feature_version,
-    ) or 0)
-
-
-async def upsert_event_windows_batch(windows: list[dict]) -> None:
-    """Batch upsert event windows in one executemany call instead of N round trips."""
-    if not windows:
-        return
-    pool = await get_pool()
-    records = []
-    for w in windows:
-        w = dict(w)
-        w.pop("source_type", None)
-        w.pop("source_match_id", None)
-        w.pop("steam_id", None)
-        embedding = w.pop("embedding", None)
-        records.append((
-            w.get("window_id"),
-            w.get("game_id"),
-            w.get("map_name"),
-            w.get("round_num"),
-            w.get("start_tick"),
-            w.get("anchor_tick"),
-            w.get("end_tick"),
-            w.get("side_to_query"),
-            w.get("phase"),
-            w.get("site"),
-            w.get("anchor_kind"),
-            w.get("alive_ct"),
-            w.get("alive_t"),
-            w.get("feature_version"),
-            config.to_managed_path(w.get("feature_path")) if w.get("feature_path") else None,
-            _format_embedding(embedding) if embedding is not None else None,
-        ))
-    await pool.executemany(
-        """
-        INSERT INTO event_windows (
-            window_id, game_id, map_name, round_num,
-            start_tick, anchor_tick, end_tick, side_to_query,
-            phase, site, anchor_kind, alive_ct, alive_t,
-            feature_version, feature_path, embedding
-        ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8,
-            $9, $10, $11, $12, $13, $14, $15, $16::vector(54)
-        )
-        ON CONFLICT (window_id) DO UPDATE SET
-            game_id         = EXCLUDED.game_id,
-            map_name        = EXCLUDED.map_name,
-            round_num       = EXCLUDED.round_num,
-            start_tick      = EXCLUDED.start_tick,
-            anchor_tick     = EXCLUDED.anchor_tick,
-            end_tick        = EXCLUDED.end_tick,
-            side_to_query   = EXCLUDED.side_to_query,
-            phase           = EXCLUDED.phase,
-            site            = EXCLUDED.site,
-            anchor_kind     = EXCLUDED.anchor_kind,
-            alive_ct        = EXCLUDED.alive_ct,
-            alive_t         = EXCLUDED.alive_t,
-            feature_version = EXCLUDED.feature_version,
-            feature_path    = EXCLUDED.feature_path,
-            embedding       = EXCLUDED.embedding
-        """,
-        records,
-    )
-
-
-async def upsert_event_window(window_id: str, **kwargs) -> None:
-    """Insert or replace an event-window record. kwargs must match column names."""
-    pool = await get_pool()
-
-    # Drop legacy fields that were removed from the schema.
-    kwargs.pop("source_type", None)
-    kwargs.pop("source_match_id", None)
-    kwargs.pop("steam_id", None)
-
-    embedding = kwargs.pop("embedding", None)
-    if kwargs.get("feature_path"):
-        kwargs["feature_path"] = config.to_managed_path(kwargs["feature_path"])
-
-    cols = ["window_id"] + list(kwargs.keys())
-    params: list = [window_id] + list(kwargs.values())
-    placeholders = [f"${i+1}" for i in range(len(params))]
-
-    if embedding is not None:
-        cols.append("embedding")
-        params.append(_format_embedding(embedding))
-        placeholders.append(f"${len(params)}::vector({VECTOR_DIM})")
-
-    col_list = ", ".join(cols)
-    placeholder_str = ", ".join(placeholders)
-    updates = ", ".join(
-        f"{c} = EXCLUDED.{c}" for c in cols if c not in ("window_id", "created_at")
-    )
-    await pool.execute(
-        f"""
-        INSERT INTO event_windows ({col_list}) VALUES ({placeholder_str})
-        ON CONFLICT (window_id) DO UPDATE SET {updates}
-        """,
-        *params,
-    )
-
-
-async def get_event_window(window_id: str) -> dict | None:
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        "SELECT * FROM event_windows WHERE window_id = $1",
-        window_id,
-    )
-    return _normalize_path_fields(dict(row), "feature_path") if row else None
-
-
-async def list_event_window_candidates(
-    *,
-    source_type: str = "pro",
-    map_name: str | None = None,
-    phase: str | None = None,
-    side_to_query: str | None = None,
-    feature_version: str | None = None,
-    limit: int = 250,
-) -> list[dict]:
-    pool = await get_pool()
-
-    filters = ["g.source_type = $1"]
-    params: list = [source_type]
-
-    if map_name is not None:
-        params.append(map_name)
-        filters.append(f"ew.map_name = ${len(params)}")
-    if phase is not None:
-        params.append(phase)
-        filters.append(f"ew.phase = ${len(params)}")
-    if side_to_query is not None:
-        params.append(side_to_query)
-        filters.append(f"(ew.side_to_query = ${len(params)} OR ew.side_to_query IS NULL)")
-    if feature_version is not None:
-        params.append(feature_version)
-        filters.append(f"ew.feature_version = ${len(params)}")
-
-    params.append(limit)
-    query = (
-        "SELECT ew.*, ew.game_id AS source_match_id, g.source_type "
-        "FROM event_windows ew "
-        "JOIN games g ON g.game_id = ew.game_id "
-        f"WHERE {' AND '.join(filters)} "
-        "ORDER BY ew.created_at DESC "
-        f"LIMIT ${len(params)}"
-    )
-    rows = await pool.fetch(query, *params)
-    return [_normalize_path_fields(dict(r), "feature_path") for r in rows]
-
-
-async def ann_search_event_windows(
-    embedding: list[float],
-    *,
-    source_type: str = "pro",
-    map_name: str | None = None,
-    feature_version: str | None = None,
-    limit: int = 200,
-) -> list[dict]:
-    """Return up to `limit` event windows nearest to `embedding` via HNSW cosine search."""
-    pool = await get_pool()
-    embedding_str = _format_embedding(embedding)
-
-    filters = ["g.source_type = $2", "ew.embedding IS NOT NULL"]
-    params: list = [embedding_str, source_type]
-
-    if map_name is not None:
-        params.append(map_name)
-        filters.append(f"ew.map_name = ${len(params)}")
-    if feature_version is not None:
-        params.append(feature_version)
-        filters.append(f"ew.feature_version = ${len(params)}")
-
-    params.append(limit)
-    query = (
-        "SELECT ew.*, ew.game_id AS source_match_id, g.source_type, "
-        f"       (ew.embedding <=> $1::vector({VECTOR_DIM})) AS cosine_distance "
-        "FROM event_windows ew "
-        "JOIN games g ON g.game_id = ew.game_id "
-        f"WHERE {' AND '.join(filters)} "
-        f"ORDER BY ew.embedding <=> $1::vector({VECTOR_DIM}) "
-        f"LIMIT ${len(params)}"
-    )
-    rows = await pool.fetch(query, *params)
-    return [_normalize_path_fields(dict(r), "feature_path") for r in rows]
+    return [_normalize_path_fields(dict(r), "parquet_dir") for r in rows]
 
 
 # ── Round analysis cache ───────────────────────────────────────────────────────
