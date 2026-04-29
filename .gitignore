@@ -33,8 +33,6 @@ demos_user/
 demos_pro/
 parquet_user/
 parquet_pro/
-derived_user/
-derived_pro/
 *.dem
 *.dem.bz2
 *.part

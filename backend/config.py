@@ -19,16 +19,12 @@ DEMOS_PRO_DIR:    Path = Path(os.getenv("DEMOS_PRO_DIR",    str(_BASE / "demos_p
 DEMOS_USER_DIR:   Path = Path(os.getenv("DEMOS_USER_DIR",   str(_BASE / "demos_user")))
 PARQUET_PRO_DIR:  Path = Path(os.getenv("PARQUET_PRO_DIR",  str(_BASE / "parquet_pro")))
 PARQUET_USER_DIR: Path = Path(os.getenv("PARQUET_USER_DIR", str(_BASE / "parquet_user")))
-DERIVED_PRO_DIR:  Path = Path(os.getenv("DERIVED_PRO_DIR",  str(_BASE / "derived_pro")))
-DERIVED_USER_DIR: Path = Path(os.getenv("DERIVED_USER_DIR", str(_BASE / "derived_user")))
 
 for _d in (
     DEMOS_PRO_DIR,
     DEMOS_USER_DIR,
     PARQUET_PRO_DIR,
     PARQUET_USER_DIR,
-    DERIVED_PRO_DIR,
-    DERIVED_USER_DIR,
 ):
     _d.mkdir(parents=True, exist_ok=True)
 
@@ -38,8 +34,6 @@ _CONTAINER_PATH_PREFIXES: tuple[tuple[str, Path], ...] = (
     ("/app/parquet_user", PARQUET_USER_DIR),
     ("/app/demos_pro",    DEMOS_PRO_DIR),
     ("/app/demos_user",   DEMOS_USER_DIR),
-    ("/app/derived_pro",  DERIVED_PRO_DIR),
-    ("/app/derived_user", DERIVED_USER_DIR),
 )
 
 
@@ -72,19 +66,3 @@ def to_managed_path(local_path: str | Path) -> str:
             suffix = raw[len(root) + 1:]
             return f"{prefix}/{suffix}"
     return raw
-
-
-def derived_match_dir(source_type: str, source_match_id: str, steam_id: str | None = None) -> Path:
-    """Return the writable local directory for derived match outputs.
-
-    User matches: derived_user/{steam_id}/{source_match_id}/
-    Pro matches:  derived_pro/{source_match_id}/
-    """
-    if source_type == "pro":
-        match_dir = DERIVED_PRO_DIR / source_match_id
-    elif steam_id:
-        match_dir = DERIVED_USER_DIR / steam_id / source_match_id
-    else:
-        match_dir = DERIVED_USER_DIR / source_match_id
-    match_dir.mkdir(parents=True, exist_ok=True)
-    return match_dir

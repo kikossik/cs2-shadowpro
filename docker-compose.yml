@@ -51,8 +51,6 @@ services:
       - ./demos_pro:/app/demos_pro
       - ./parquet_user:/app/parquet_user
       - ./parquet_pro:/app/parquet_pro
-      - ./derived_user:/app/derived_user
-      - ./derived_pro:/app/derived_pro
       - ~/.awpy/navs:/root/.awpy/navs:ro
     depends_on:
       db:
@@ -73,8 +71,9 @@ services:
       SYNC_INTERVAL_SECONDS: "300"
     volumes:
       - ./demos_user:/app/demos_user
+      - ./parquet_pro:/app/parquet_pro
       - ./parquet_user:/app/parquet_user
-      - ./derived_user:/app/derived_user
+      - ~/.awpy/navs:/root/.awpy/navs:ro
     depends_on:
       db:
         condition: service_healthy
@@ -111,7 +110,6 @@ services:
     volumes:
       - ./demos_pro:/app/demos_pro
       - ./parquet_pro:/app/parquet_pro
-      - ./derived_pro:/app/derived_pro
       - ~/.awpy/navs:/root/.awpy/navs:ro
     depends_on:
       db:
