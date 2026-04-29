@@ -30,30 +30,14 @@ export function SetupPage({ steamId, onComplete, onSignOut }: SetupPageProps) {
         const err = await r.json().catch(() => ({ detail: "Setup failed" }));
         throw new Error(err.detail ?? "Setup failed");
       }
-      const { job_id } = await r.json();
-      await pollJob(job_id);
+      // Setup runs sync in the background; navigate to the matches page
+      // immediately. Imports will appear there as the worker processes them.
       onComplete();
     } catch (err) {
       setPhase("error");
       setError(String(err).replace(/^Error:\s*/, ""));
     }
   };
-
-  async function pollJob(jobId: string) {
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 3000));
-      try {
-        const r = await fetch(`/api/import/${jobId}`);
-        if (!r.ok) continue;
-        const data = await r.json();
-        if (data.status === "done") return;
-        if (data.status === "error") throw new Error(data.error ?? "Sync failed");
-      } catch (e) {
-        if (i > 10) throw e; // give up after ~30s of fetch errors
-      }
-    }
-    // timed out — proceed anyway, user can re-sync from the matches page
-  }
 
   if (phase === "syncing") {
     return (

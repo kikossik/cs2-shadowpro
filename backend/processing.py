@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 import shutil
 
-import asyncpg
 import polars as pl
 from awpy import Demo
 
@@ -120,44 +119,6 @@ _PARQUET_FIELDS = (
 _MATCH_TYPES = {"unknown", "premier", "competitive", "faceit"}
 
 
-def _safe_int(value) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _round_fact_rows(rounds_df: pl.DataFrame) -> list[dict]:
-    rows: list[dict] = []
-    for row in rounds_df.iter_rows(named=True):
-        start_tick = _safe_int(row.get("start"))
-        freeze_end_tick = _safe_int(row.get("freeze_end"))
-        end_tick = _safe_int(row.get("end"))
-        official_end_tick = _safe_int(row.get("official_end")) or end_tick
-        origin_tick = freeze_end_tick if freeze_end_tick is not None else start_tick
-        duration_ticks = (
-            official_end_tick - origin_tick
-            if official_end_tick is not None and origin_tick is not None
-            else None
-        )
-        rows.append({
-            "round_num": _safe_int(row.get("round_num")),
-            "start_tick": start_tick,
-            "freeze_end_tick": freeze_end_tick,
-            "end_tick": end_tick,
-            "official_end_tick": official_end_tick,
-            "winner_side": row.get("winner"),
-            "reason": row.get("reason"),
-            "bomb_plant_tick": _safe_int(row.get("bomb_plant")),
-            "bomb_site": row.get("bomb_site"),
-            "duration_ticks": duration_ticks,
-        })
-    return rows
-
-
-
 def _write_parquets(dem: Demo, parquet_dir: Path, demo_id: str) -> None:
     parquet_dir.mkdir(parents=True, exist_ok=True)
 
@@ -204,7 +165,7 @@ def _write_parquets(dem: Demo, parquet_dir: Path, demo_id: str) -> None:
     _w(flashes, "flashes")
 
 
-async def _save_match(demo_id: str, player_kwargs: dict, game_kwargs: dict, round_rows: list[dict], windows: list[dict]) -> None:
+async def _save_match(demo_id: str, game_kwargs: dict, windows: list[dict]) -> None:
     # process_demo runs in a ThreadPoolExecutor via asyncio.run(), which creates a new
     # event loop. The global db._pool was created in FastAPI's main event loop and
     # cannot be used from a different loop, so we create a fresh pool here.
@@ -214,11 +175,7 @@ async def _save_match(demo_id: str, player_kwargs: dict, game_kwargs: dict, roun
     db._pool = pool
     try:
         await db.upsert_user_game(game_id=demo_id, **game_kwargs)
-        await db.upsert_game_player_stats(game_id=demo_id, **player_kwargs)
-        await db.upsert_rounds(demo_id, round_rows)
-        for window in windows:
-            window_id = window.pop("window_id")
-            await db.upsert_event_window(window_id, **window)
+        await db.upsert_event_windows_batch(windows)
     finally:
         db._pool = orig_pool
         await pool.close()
@@ -231,7 +188,7 @@ def process_demo(
     share_code: str | None = None,
     match_type: str = "unknown",
 ) -> dict:
-    """Parse a demo, write Parquet files, build artifact, upsert user_matches row."""
+    """Parse a demo, write Parquet files, build artifact, upsert the user game row."""
     match_type = (match_type or "unknown").strip().lower()
     if match_type not in _MATCH_TYPES:
         match_type = "unknown"
@@ -246,7 +203,6 @@ def process_demo(
     match_date = datetime.fromtimestamp(demo_path.stat().st_mtime, tz=timezone.utc)
     stats = _match_stats(dem, steam_id)
     rounds = dem.rounds if dem.rounds is not None else pl.DataFrame()
-    round_rows = _round_fact_rows(rounds) if rounds.height > 0 else []
 
     try:
         artifact_path = build_match_artifact(
@@ -275,19 +231,14 @@ def process_demo(
             "tick_rate":              TICK_RATE,
             "artifact_version":       ARTIFACT_VERSION,
             "window_feature_version": FEATURE_VERSION,
-        }
-        # Player stats go to game_player_stats (score_ct/score_t are the user's
-        # team rounds won/lost, not raw CT/T side win counts).
-        player_kwargs = {
-            "steam_id":   steam_id,
-            "side_first": stats.get("user_side_first"),
-            "rounds_won":  stats.get("score_ct"),
-            "rounds_lost": stats.get("score_t"),
-            "result":     stats.get("user_result"),
-            "kills":      stats.get("kills"),
-            "deaths":     stats.get("deaths"),
-            "assists":    stats.get("assists"),
-            "hs_pct":     stats.get("hs_pct"),
+            "user_side_first":        stats.get("user_side_first"),
+            "user_rounds_won":        stats.get("score_ct"),
+            "user_rounds_lost":       stats.get("score_t"),
+            "user_result":            stats.get("user_result"),
+            "user_kills":             stats.get("kills"),
+            "user_deaths":            stats.get("deaths"),
+            "user_assists":           stats.get("assists"),
+            "user_hs_pct":            stats.get("hs_pct"),
         }
         windows = extract_match_event_windows(
             source_type="user",
@@ -297,7 +248,7 @@ def process_demo(
             map_name=map_name,
             steam_id=steam_id,
         )
-        asyncio.run(_save_match(demo_id, player_kwargs, game_kwargs, round_rows, windows))
+        asyncio.run(_save_match(demo_id, game_kwargs, windows))
     except Exception:
         shutil.rmtree(parquet_dir, ignore_errors=True)
         raise

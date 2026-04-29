@@ -109,7 +109,8 @@ def process_share_code(steam_id: str, share_code: str) -> dict:
     """Resolve, download, and process a single share code. Returns summary dict."""
     slug     = share_code.replace("CSGO-", "").replace("-", "_")
     demo_id  = f"user_{steam_id}_{slug}.dem"
-    dem_path = config.DEMOS_USER_DIR / demo_id
+    dem_path = config.DEMOS_USER_DIR / steam_id / demo_id
+    dem_path.parent.mkdir(parents=True, exist_ok=True)
 
     demo_url = _resolve_demo_url(share_code)
     _download_and_decompress(demo_url, dem_path)
@@ -180,7 +181,8 @@ def _sync_user_locked(steam_id: str) -> dict:
     for share_code in new_codes:
         slug     = share_code.replace("CSGO-", "").replace("-", "_")
         demo_id  = f"user_{steam_id}_{slug}.dem"
-        dem_path = config.DEMOS_USER_DIR / demo_id
+        dem_path = config.DEMOS_USER_DIR / steam_id / demo_id
+        dem_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             demo_url = _resolve_demo_url(share_code)

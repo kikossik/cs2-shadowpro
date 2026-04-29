@@ -1,4 +1,4 @@
-"""Parse a pro demo and write Parquet files + dimensional DB records.
+"""Parse a pro demo and write Parquet files + flat DB records.
 
 Ingest flow:
   1. _parse_ingest_sync runs in a ProcessPoolExecutor (off the event loop):
@@ -38,43 +38,6 @@ VALID_MAPS = {
 _AWPY_VERSION = getattr(awpy, "__version__", "unknown")
 
 
-def _safe_int(value) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _round_fact_rows(rounds_df: pl.DataFrame) -> list[dict]:
-    rows: list[dict] = []
-    for row in rounds_df.iter_rows(named=True):
-        start_tick = _safe_int(row.get("start"))
-        freeze_end_tick = _safe_int(row.get("freeze_end"))
-        end_tick = _safe_int(row.get("end"))
-        official_end_tick = _safe_int(row.get("official_end")) or end_tick
-        origin_tick = freeze_end_tick if freeze_end_tick is not None else start_tick
-        duration_ticks = (
-            official_end_tick - origin_tick
-            if official_end_tick is not None and origin_tick is not None
-            else None
-        )
-        rows.append({
-            "round_num": _safe_int(row.get("round_num")),
-            "start_tick": start_tick,
-            "freeze_end_tick": freeze_end_tick,
-            "end_tick": end_tick,
-            "official_end_tick": official_end_tick,
-            "winner_side": row.get("winner"),
-            "reason": row.get("reason"),
-            "bomb_plant_tick": _safe_int(row.get("bomb_plant")),
-            "bomb_site": row.get("bomb_site"),
-            "duration_ticks": duration_ticks,
-        })
-    return rows
-
-
 def _parse_ingest_sync(demo_path: str, parquet_dir: str, match_id: str) -> dict:
     """All CPU-heavy work for one pro demo. Runs in a ProcessPoolExecutor.
 
@@ -98,7 +61,6 @@ def _parse_ingest_sync(demo_path: str, parquet_dir: str, match_id: str) -> dict:
     if "winner" in rounds_df.columns:
         ct_round_wins = int((rounds_df["winner"] == "ct").sum())
         t_round_wins  = int((rounds_df["winner"] == "t").sum())
-    round_rows = _round_fact_rows(rounds_df)
     round_count = rounds_df.height
     del rounds_df
 
@@ -123,7 +85,6 @@ def _parse_ingest_sync(demo_path: str, parquet_dir: str, match_id: str) -> dict:
         "round_count":    round_count,
         "ct_round_wins":  ct_round_wins,
         "t_round_wins":   t_round_wins,
-        "round_rows":     round_rows,
         "artifact_path":  str(artifact_path),
         "windows":        windows,
     }
@@ -136,7 +97,7 @@ async def ingest_pro_demo(
     executor: ProcessPoolExecutor | None = None,
     **meta,
 ) -> dict:
-    """Parse demo, write Parquets, build artifact, upsert dimensional records.
+    """Parse demo, write Parquets, build artifact, upsert flat game records.
 
     Pass a shared ProcessPoolExecutor to avoid spawning a new process per call.
     If omitted, a temporary single-use executor is created automatically.
@@ -166,7 +127,6 @@ async def ingest_pro_demo(
 
     map_name      = parsed["map_name"]
     round_count   = parsed["round_count"]
-    round_rows    = parsed["round_rows"]
     artifact_path = parsed["artifact_path"]
     windows       = parsed["windows"]
 
@@ -203,7 +163,6 @@ async def ingest_pro_demo(
             artifact_version=ARTIFACT_VERSION,
             window_feature_version=FEATURE_VERSION,
         )
-        await db.upsert_rounds(match_id, round_rows)
         await db.upsert_event_windows_batch(windows)
     except Exception:
         shutil.rmtree(parquet_dir, ignore_errors=True)

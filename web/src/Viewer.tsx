@@ -5,8 +5,6 @@ import { RadarCanvas } from "./replay/RadarCanvas";
 import { useRoundPlayback, buildWeaponMap } from "./replay/useRoundPlayback";
 import type {
   MapConfig,
-  RoundAnalysisLogicScore,
-  RoundAnalysisMatch,
   RoundAnalysisResponse,
   RoundMeta,
   RoundReplayData,
@@ -63,13 +61,6 @@ function userSideThisRound(data: RoundReplayData | null, steamId: string): "ct" 
   const first = data?.ticks[0];
   if (!first) return null;
   return first.players.find(p => p.steamid === steamId)?.side ?? null;
-}
-
-function pickActiveLogic(match: RoundAnalysisMatch | null): RoundAnalysisLogicScore | null {
-  if (!match) return null;
-  const navScore = match.logic_scores?.nav ?? match.nav?.score ?? 0;
-  const origScore = match.logic_scores?.original ?? match.original?.score ?? 0;
-  return navScore >= origScore ? match.nav : match.original;
 }
 
 function fmtReason(reason: string | null): string {
@@ -210,8 +201,6 @@ export function Viewer({
 
   const analysisResult = analysis?.result ?? null;
   const bestMatch = analysisResult?.best_match ?? null;
-  const selectedMatch = analysisResult?.selected_match ?? null;
-  const activeLogicDetail = pickActiveLogic(selectedMatch);
 
   // Pro replay loads as soon as we know which pro round to fetch.
   useEffect(() => {
@@ -266,21 +255,10 @@ export function Viewer({
       ? outcome.winner_side === userSide
       : null;
 
-  const mappedUserSteamId =
-    activeLogicDetail?.user_focal_steamid
-    ?? selectedMatch?.original?.user_focal_steamid
-    ?? selectedMatch?.nav?.user_focal_steamid
-    ?? steamId;
-  const mappedProSteamId =
-    activeLogicDetail?.matched_pro_steamid
-    ?? activeLogicDetail?.pro_steamid
-    ?? selectedMatch?.original?.matched_pro_steamid
-    ?? selectedMatch?.nav?.matched_pro_steamid
-    ?? bestMatch?.matched_pro_steamid
-    ?? bestMatch?.pro_steamid
-    ?? null;
-  const userHighlightedSteamIds = bestMatch && mappedUserSteamId ? [mappedUserSteamId] : [];
-  const proHighlightedSteamIds  = bestMatch && mappedProSteamId  ? [mappedProSteamId]  : [];
+  // Per-player mapping is not produced by the placeholder mapper; highlight only
+  // the user's own steam id on their side, and nothing on the pro side.
+  const userHighlightedSteamIds = bestMatch ? [steamId] : [];
+  const proHighlightedSteamIds: string[]  = [];
 
   return (
     <div className="app" style={{ background: theme.bg, color: theme.ink, fontFamily: theme.fontHead }}>

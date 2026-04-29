@@ -5,7 +5,6 @@ Run:
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import shutil
 import time
@@ -22,12 +21,9 @@ from backend import config, db
 from backend.log import get_logger
 from pipeline.features.featurize_windows import TICK_RATE
 from backend.round_analysis_service import (
-    MATCHER_VERSION as _ROUND_ANALYSIS_MATCHER_VERSION,
-    PRO_CORPUS_VERSION as _ROUND_ANALYSIS_PRO_CORPUS_VERSION,
-    _load_round_artifact,
     compute_and_cache_round,
-    map_display as _map_display,
-    normalize_round_analysis_result as _normalize_round_analysis_result,
+    normalize_round_analysis_result,
+    _map_display,
 )
 
 log = get_logger("API")
@@ -41,24 +37,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_jobs: dict[str, dict] = {}
 _executor = ThreadPoolExecutor(max_workers=2)
-_round_analysis_jobs: dict[str, asyncio.Task[None]] = {}
-_round_analysis_jobs_lock = asyncio.Lock()
-
-_ROUND_ANALYSIS_LOGICS = {"nav", "original", "both"}
-_ROUND_ANALYSIS_JOB_NAME = "round_analysis"
 
 
 # ── Lifecycle ──────────────────────────────────────────────────────────────────
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    tasks = list(_round_analysis_jobs.values())
-    for task in tasks:
-        task.cancel()
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
     await db.close_pool()
     _executor.shutdown(wait=False, cancel_futures=True)
 
@@ -162,44 +147,30 @@ async def setup_user(
     await db.upsert_user(steam_id,
                          match_auth_code=match_auth_code,
                          last_share_code=last_share_code)
-    job_id = str(uuid.uuid4())
-    _jobs[job_id] = {"status": "syncing", "steam_id": steam_id}
 
     def _run() -> None:
         from backend.sync import process_share_code, sync_user
-        results = []
         try:
-            r = process_share_code(steam_id, last_share_code)
-            results.append(r)
+            process_share_code(steam_id, last_share_code)
         except Exception as exc:
             log.error("setup share-code processing failed for %s: %s", steam_id, exc, exc_info=True)
-            results.append({"error": str(exc)})
         try:
-            sync_result = sync_user(steam_id)
+            sync_user(steam_id)
         except Exception as exc:
             log.error("sync failed for %s: %s", steam_id, exc, exc_info=True)
-            sync_result = {"new_matches": 0, "errors": [str(exc)]}
-        results.append(sync_result)
-        new_matches = sum(1 for r in results if "demo_id" in r)
-        new_matches += sync_result.get("new_matches", 0)
-        _jobs[job_id].update({"status": "done", "new_matches": new_matches})
 
     _executor.submit(_run)
-    return {"job_id": job_id, "message": "Setup saved, sync started"}
+    return {"message": "Setup saved, sync started"}
 
 
 @app.post("/api/sync/{steam_id}")
 async def trigger_sync(steam_id: str, background_tasks: BackgroundTasks):
-    job_id = str(uuid.uuid4())
-    _jobs[job_id] = {"status": "syncing", "steam_id": steam_id}
-
     def _run() -> None:
         from backend.sync import sync_user
-        result = sync_user(steam_id)
-        _jobs[job_id].update({"status": "done", **result})
+        sync_user(steam_id)
 
     background_tasks.add_task(_executor.submit, _run)
-    return {"job_id": job_id}
+    return {"message": "Sync started"}
 
 
 # ── Demo import ────────────────────────────────────────────────────────────────
@@ -217,7 +188,8 @@ async def import_demo(
 
     job_id    = str(uuid.uuid4())
     safe_name = f"{int(time.time())}_{file.filename}"
-    dest      = config.DEMOS_USER_DIR / safe_name
+    dest      = config.DEMOS_USER_DIR / steam_id / safe_name
+    dest.parent.mkdir(parents=True, exist_ok=True)
 
     with dest.open("wb") as fh:
         shutil.copyfileobj(file.file, fh)
@@ -433,189 +405,44 @@ async def get_round_replay(demo_id: str, round_num: int):
 
 # ── Round analysis ─────────────────────────────────────────────────────────────
 
-def _decode_json_blob(value: str | None) -> dict | None:
+def _decode_result_json(value) -> dict | None:
     if value is None:
         return None
+    if isinstance(value, dict):
+        return value
     return json.loads(value)
 
 
-def _round_analysis_meta(
-    *,
-    demo_id: str,
-    round_num: int,
-    logic: str,
-    cache_key: str,
-    cache_status: str,
-    resolved_from_cache: bool,
-) -> dict:
-    return {
-        "demo_id": demo_id,
-        "round_num": round_num,
-        "logic": logic,
-        "cache_key": cache_key,
-        "cache_status": cache_status,
-        "resolved_from_cache": resolved_from_cache,
-        "matcher_version": _ROUND_ANALYSIS_MATCHER_VERSION,
-        "pro_corpus_version": _ROUND_ANALYSIS_PRO_CORPUS_VERSION,
-    }
-
-
-async def _run_round_analysis_job(
-    *,
-    cache_key: str,
-    demo_id: str,
-    round_num: int,
-    logic: str,
-    match_record: dict,
-) -> None:
-    run_id: int | None = None
-    try:
-        run_id = await db.start_job_run(_ROUND_ANALYSIS_JOB_NAME)
-        await compute_and_cache_round(demo_id, round_num, logic, match_record)
-        if run_id is not None:
-            await db.finish_job_run(run_id, status="done", items_processed=1,
-                                     stats={"cache_key": cache_key, "logic": logic,
-                                            "round_num": round_num, "demo_id": demo_id})
-    except (asyncio.CancelledError, Exception) as exc:
-        err_msg = "Cancelled" if isinstance(exc, asyncio.CancelledError) else str(exc)
-        if not isinstance(exc, asyncio.CancelledError):
-            await db.upsert_round_analysis_result(
-                cache_key=cache_key, demo_id=demo_id, round_num=round_num, logic=logic,
-                matcher_version=_ROUND_ANALYSIS_MATCHER_VERSION,
-                pro_corpus_version=_ROUND_ANALYSIS_PRO_CORPUS_VERSION,
-                status="error", error_message=err_msg,
-            )
-        if run_id is not None:
-            await db.finish_job_run(run_id, status="error", items_processed=0,
-                                     error_message=err_msg,
-                                     stats={"cache_key": cache_key, "logic": logic,
-                                            "round_num": round_num, "demo_id": demo_id})
-        if isinstance(exc, asyncio.CancelledError):
-            raise
-    finally:
-        async with _round_analysis_jobs_lock:
-            current = _round_analysis_jobs.get(cache_key)
-            if current is asyncio.current_task():
-                _round_analysis_jobs.pop(cache_key, None)
-
-
-async def _enqueue_round_analysis_job(
-    *,
-    cache_key: str,
-    demo_id: str,
-    round_num: int,
-    logic: str,
-    match_record: dict,
-) -> bool:
-    async with _round_analysis_jobs_lock:
-        existing = _round_analysis_jobs.get(cache_key)
-        if existing is not None and not existing.done():
-            return False
-        task = asyncio.create_task(
-            _run_round_analysis_job(
-                cache_key=cache_key, demo_id=demo_id, round_num=round_num,
-                logic=logic, match_record=match_record,
-            )
-        )
-        _round_analysis_jobs[cache_key] = task
-        return True
-
-
-def _round_analysis_response_from_row(
-    *,
-    row: dict,
-    demo_id: str,
-    round_num: int,
-    logic: str,
-    cache_key: str,
-    cache_status: str,
-    resolved_from_cache: bool,
-) -> dict:
-    return {
-        "status": row["status"],
-        "analysis": _round_analysis_meta(
-            demo_id=demo_id, round_num=round_num, logic=logic,
-            cache_key=cache_key, cache_status=cache_status,
-            resolved_from_cache=resolved_from_cache,
-        ),
-        "result": _normalize_round_analysis_result(_decode_json_blob(row.get("result_json"))),
-        "error":  row.get("error_message"),
-    }
-
-
-async def _build_round_analysis_response(
-    demo_id: str,
-    round_num: int,
-    logic: str,
-    match_record: dict,
-) -> dict:
-    cache_state = await db.get_round_analysis_result_state(
-        demo_id=demo_id,
-        round_num=round_num,
-        logic=logic,
-        matcher_version=_ROUND_ANALYSIS_MATCHER_VERSION,
-        pro_corpus_version=_ROUND_ANALYSIS_PRO_CORPUS_VERSION,
-    )
-    cache_key    = cache_state["cache_key"]
-    cache_status = cache_state["cache_status"]
-    exact_row    = cache_state.get("result")
-    stale_row    = cache_state.get("stale_result")
-
-    if exact_row is not None:
-        if exact_row.get("status") == "pending":
-            await _enqueue_round_analysis_job(
-                cache_key=cache_key, demo_id=demo_id, round_num=round_num,
-                logic=logic, match_record=match_record,
-            )
-        return _round_analysis_response_from_row(
-            row=exact_row, demo_id=demo_id, round_num=round_num, logic=logic,
-            cache_key=cache_key, cache_status=cache_status, resolved_from_cache=True,
-        )
-
-    await db.upsert_round_analysis_result(
-        cache_key=cache_key, demo_id=demo_id, round_num=round_num, logic=logic,
-        matcher_version=_ROUND_ANALYSIS_MATCHER_VERSION,
-        pro_corpus_version=_ROUND_ANALYSIS_PRO_CORPUS_VERSION,
-        status="pending",
-    )
-    await _enqueue_round_analysis_job(
-        cache_key=cache_key, demo_id=demo_id, round_num=round_num,
-        logic=logic, match_record=match_record,
-    )
-
-    if stale_row is not None and stale_row.get("status") == "done":
-        return _round_analysis_response_from_row(
-            row=stale_row, demo_id=demo_id, round_num=round_num, logic=logic,
-            cache_key=cache_key, cache_status="stale", resolved_from_cache=True,
-        )
-
-    return {
-        "status":   "pending",
-        "analysis": _round_analysis_meta(
-            demo_id=demo_id, round_num=round_num, logic=logic,
-            cache_key=cache_key, cache_status=cache_status, resolved_from_cache=False,
-        ),
-        "result": None,
-        "error":  None,
-    }
-
-
 @app.get("/api/round-analysis/{demo_id}/{round_num}")
-async def get_round_analysis(demo_id: str, round_num: int, logic: str = "nav"):
-    """Round analysis: Stage 1 retrieval + Stage 2 deep matching."""
-    if logic not in _ROUND_ANALYSIS_LOGICS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported logic '{logic}'. Expected: {', '.join(sorted(_ROUND_ANALYSIS_LOGICS))}",
-        )
+async def get_round_analysis(demo_id: str, round_num: int):
+    """Return the user→pro mapping for one round.
 
+    Cached per (game_id, round_num). On cache miss we compute synchronously —
+    the placeholder mapper is fast (one ANN call). The worker also precomputes
+    after import, so user-facing requests usually hit a fresh cache entry."""
     record = await db.get_match_source_record(demo_id)
     if record is None or not record.get("parquet_dir"):
         raise HTTPException(status_code=404, detail="Demo not found or not yet processed")
 
+    state = await db.get_round_analysis_result_state(demo_id=demo_id, round_num=round_num)
+    if state["cache_status"] == "fresh" and state["result"] is not None:
+        row = state["result"]
+        return {
+            "status": row["status"],
+            "result": normalize_round_analysis_result(_decode_result_json(row.get("result_json"))),
+            "error":  row.get("error_message"),
+        }
+
     try:
-        if record.get("source_type") == "user":
-            await _load_round_artifact(record, round_num)
-        return await _build_round_analysis_response(demo_id, round_num, logic, record)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=f"Parquet file missing: {exc.filename}") from exc
+        payload = await compute_and_cache_round(demo_id, round_num)
+        return {
+            "status": "done",
+            "result": normalize_round_analysis_result(payload),
+            "error":  None,
+        }
+    except Exception as exc:
+        log.error("round analysis compute failed for %s/%s: %s", demo_id, round_num, exc, exc_info=True)
+        await db.upsert_round_analysis_result(
+            demo_id=demo_id, round_num=round_num, status="error", error_message=str(exc),
+        )
+        return {"status": "error", "result": None, "error": str(exc)}

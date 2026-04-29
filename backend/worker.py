@@ -40,43 +40,24 @@ def _process_one_demo(job: dict) -> dict:
 
 
 async def _precompute_round_analysis(demo_id: str, round_count: int) -> None:
-    from backend.round_analysis_service import (
-        MATCHER_VERSION, PRO_CORPUS_VERSION, compute_and_cache_round,
-    )
-
-    match_record = await db.get_match_source_record(demo_id)
-    if match_record is None:
-        log.warning("precompute: no match record found for %s", demo_id)
-        return
+    from backend.round_analysis_service import compute_and_cache_round
 
     log.info("precomputing round analysis for %s (%d rounds)", demo_id, round_count)
 
     for round_num in range(1, round_count + 1):
-        cache_key = f"{demo_id}:{round_num}:both:{PRO_CORPUS_VERSION}:{MATCHER_VERSION}"
         await db.upsert_round_analysis_result(
-            cache_key=cache_key,
-            demo_id=demo_id,
-            round_num=round_num,
-            logic="both",
-            matcher_version=MATCHER_VERSION,
-            pro_corpus_version=PRO_CORPUS_VERSION,
-            status="pending",
+            demo_id=demo_id, round_num=round_num, status="pending",
         )
 
     for round_num in range(1, round_count + 1):
-        cache_key = f"{demo_id}:{round_num}:both:{PRO_CORPUS_VERSION}:{MATCHER_VERSION}"
         try:
-            await compute_and_cache_round(demo_id, round_num, "both", match_record)
+            await compute_and_cache_round(demo_id, round_num)
             log.info("precompute %s round %d/%d done", demo_id, round_num, round_count)
         except Exception as exc:
             log.error("precompute %s round %d failed: %s", demo_id, round_num, exc, exc_info=True)
             await db.upsert_round_analysis_result(
-                cache_key=cache_key,
                 demo_id=demo_id,
                 round_num=round_num,
-                logic="both",
-                matcher_version=MATCHER_VERSION,
-                pro_corpus_version=PRO_CORPUS_VERSION,
                 status="error",
                 error_message=str(exc),
             )

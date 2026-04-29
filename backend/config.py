@@ -7,6 +7,7 @@ load_dotenv()
 
 # PostgreSQL connection string — e.g. postgresql://user:pass@localhost/cs2shadowpro
 DATABASE_URL: str = os.environ["DATABASE_URL"]
+DB_SCHEMA:    str = os.getenv("DB_SCHEMA", "shadowpro")
 
 STEAM_API_KEY:        str = os.getenv("STEAM_API_KEY", "")
 RESOLVER_URL:         str = os.getenv("RESOLVER_URL", "http://127.0.0.1:3001")

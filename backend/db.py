@@ -12,6 +12,7 @@ from pipeline.features.vectorize import VECTOR_DIM
 
 _pool: asyncpg.Pool | None = None
 _MATCH_TYPES = {"unknown", "premier", "competitive", "faceit", "hltv"}
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _normalize_path_fields(row: dict | None, *fields: str) -> dict | None:
@@ -53,17 +54,11 @@ def _coerce_match_type(value: str | None) -> str:
     return normalized if normalized in _MATCH_TYPES else "unknown"
 
 
-def hltv_match_key(hltv_match_id: str | int | None, fallback: str) -> str:
-    """Stable dimensional match key for an HLTV match page."""
-    external_id = str(hltv_match_id or "").strip()
-    if not external_id:
-        external_id = fallback.split("_", 1)[0]
-    return f"hltv_{external_id}"
-
-
-def user_match_key(demo_id: str) -> str:
-    """Stable dimensional match key for a user-imported game."""
-    return f"user_{demo_id}"
+def _search_path() -> str:
+    schema = config.DB_SCHEMA.strip()
+    if not _IDENTIFIER_RE.fullmatch(schema):
+        raise ValueError(f"Invalid DB_SCHEMA: {config.DB_SCHEMA!r}")
+    return f"{schema}, public"
 
 
 async def get_pool() -> asyncpg.Pool:
@@ -73,6 +68,7 @@ async def get_pool() -> asyncpg.Pool:
             dsn=config.DATABASE_URL,
             min_size=2,
             max_size=10,
+            server_settings={"search_path": _search_path()},
         )
     return _pool
 
@@ -139,7 +135,7 @@ async def get_all_users() -> list[dict]:
     return [dict(r) for r in rows]
 
 
-# ── Dimensional match/game model ──────────────────────────────────────────────
+# ── Flat game model ───────────────────────────────────────────────────────────
 
 async def upsert_event_dimension(
     *,
@@ -147,31 +143,29 @@ async def upsert_event_dimension(
     source_type: str = "hltv",
     source_event_id: str | None = None,
 ) -> str | None:
-    """Upsert a source event/tournament dimension and return event_id."""
+    """Upsert a tournament/event dimension and return event_id.
+
+    source_type/source_event_id are accepted for compatibility with older
+    ingestion call sites; the simplified schema deduplicates by normalized name.
+    """
     if not event_name or not event_name.strip():
         return None
-    source_event_id = source_event_id or None  # normalize '' → NULL
-    event_id = (
-        f"{source_type}_event_{source_event_id}"
-        if source_event_id
-        else _stable_id(f"{source_type}_event", event_name)
-    )
+    event_id = _stable_id("event", event_name)
+    normalized = _normalized_name(event_name)
     pool = await get_pool()
-    await pool.execute(
+    row = await pool.fetchrow(
         """
-        INSERT INTO events (event_id, source_type, source_event_id, event_name, updated_at)
-        VALUES ($1, $2, $3, $4, NOW())
-        ON CONFLICT (event_id) DO UPDATE
-            SET source_event_id = COALESCE(EXCLUDED.source_event_id, events.source_event_id),
-                event_name = EXCLUDED.event_name,
-                updated_at = NOW()
+        INSERT INTO events (event_id, event_name, normalized_name)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (normalized_name) DO UPDATE
+            SET event_name = EXCLUDED.event_name
+        RETURNING event_id
         """,
         event_id,
-        source_type,
-        source_event_id,
         event_name.strip(),
+        normalized,
     )
-    return event_id
+    return row["event_id"] if row else event_id
 
 
 async def upsert_team_dimension(
@@ -180,99 +174,43 @@ async def upsert_team_dimension(
     source_type: str = "hltv",
     source_team_id: str | None = None,
 ) -> str | None:
-    """Upsert a team dimension and return team_id."""
+    """Upsert a team dimension and return team_id.
+
+    source_type/source_team_id are accepted for compatibility with older
+    ingestion call sites; the simplified schema deduplicates by normalized name.
+    """
     if not team_name or not team_name.strip():
         return None
     normalized = _normalized_name(team_name)
-    team_id = (
-        f"{source_type}_team_{source_team_id}"
-        if source_team_id
-        else _stable_id("team", team_name)
-    )
+    team_id = _stable_id("team", team_name)
     pool = await get_pool()
-    await pool.execute(
+    row = await pool.fetchrow(
         """
-        INSERT INTO teams (
-            team_id, source_type, source_team_id, team_name, normalized_name, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, NOW())
-        ON CONFLICT (team_id) DO UPDATE
-            SET source_team_id = COALESCE(EXCLUDED.source_team_id, teams.source_team_id),
-                team_name = EXCLUDED.team_name,
-                normalized_name = EXCLUDED.normalized_name,
-                updated_at = NOW()
+        INSERT INTO teams (team_id, team_name, normalized_name)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (normalized_name) DO UPDATE
+            SET team_name = EXCLUDED.team_name
+        RETURNING team_id
         """,
         team_id,
-        source_type,
-        source_team_id,
         team_name.strip(),
         normalized,
     )
-    return team_id
-
-
-async def upsert_match_dimension(match_id: str, **kwargs) -> None:
-    """Insert/update one source match container row."""
-    pool = await get_pool()
-    payload = dict(kwargs)
-    if "played_at" in payload:
-        payload["played_at"] = _coerce_timestamptz(payload["played_at"])
-    if "match_type" in payload:
-        payload["match_type"] = _coerce_match_type(payload["match_type"])
-    payload["updated_at"] = datetime.now(timezone.utc)
-
-    cols = ["match_id"] + list(payload.keys())
-    params = [match_id] + list(payload.values())
-    placeholders = ", ".join(f"${i+1}" for i in range(len(params)))
-    updates = ", ".join(
-        f"{c} = EXCLUDED.{c}" for c in payload if c != "created_at"
-    )
-    await pool.execute(
-        f"""
-        INSERT INTO matches ({', '.join(cols)}) VALUES ({placeholders})
-        ON CONFLICT (match_id) DO UPDATE SET {updates}
-        """,
-        *params,
-    )
-
-
-async def link_match_team(
-    *,
-    match_id: str,
-    team_slot: int,
-    team_id: str | None,
-    source_team_name: str | None,
-    maps_won: int | None = None,
-    won: bool | None = None,
-) -> None:
-    if team_id is None:
-        return
-    pool = await get_pool()
-    await pool.execute(
-        """
-        INSERT INTO match_teams (match_id, team_slot, team_id, source_team_name, maps_won, won)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (match_id, team_slot) DO UPDATE
-            SET team_id          = EXCLUDED.team_id,
-                source_team_name = EXCLUDED.source_team_name,
-                maps_won         = COALESCE(EXCLUDED.maps_won, match_teams.maps_won),
-                won              = COALESCE(EXCLUDED.won,      match_teams.won)
-        """,
-        match_id,
-        team_slot,
-        team_id,
-        source_team_name,
-        maps_won,
-        won,
-    )
+    return row["team_id"] if row else team_id
 
 
 async def upsert_game(game_id: str, **kwargs) -> None:
-    """Insert/update one parsed map/demo row."""
+    """Insert/update one parsed map/demo row in the flat games table."""
     pool = await get_pool()
     payload = dict(kwargs)
-    if "ingested_at" in payload:
-        payload["ingested_at"] = _coerce_timestamptz(payload["ingested_at"])
+    for key in ("played_at", "ingested_at"):
+        if key in payload:
+            payload[key] = _coerce_timestamptz(payload[key])
+    if "match_type" in payload:
+        payload["match_type"] = _coerce_match_type(payload["match_type"])
+    for key in ("parquet_dir", "artifact_path"):
+        if payload.get(key) is not None:
+            payload[key] = config.to_managed_path(payload[key])
     payload["updated_at"] = datetime.now(timezone.utc)
 
     cols = ["game_id"] + list(payload.keys())
@@ -287,164 +225,6 @@ async def upsert_game(game_id: str, **kwargs) -> None:
         ON CONFLICT (game_id) DO UPDATE SET {updates}
         """,
         *params,
-    )
-
-
-async def link_game_team(
-    *,
-    game_id: str,
-    team_slot: int,
-    team_id: str | None,
-    side_first: str | None = None,
-    score: int | None = None,
-    won: bool | None = None,
-) -> None:
-    """Register a team's per-map result. PK is (game_id, team_slot)."""
-    if team_id is None:
-        return
-    pool = await get_pool()
-    await pool.execute(
-        """
-        INSERT INTO game_teams (game_id, team_slot, team_id, side_first, score, won)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (game_id, team_slot) DO UPDATE
-            SET team_id    = EXCLUDED.team_id,
-                side_first = COALESCE(EXCLUDED.side_first, game_teams.side_first),
-                score      = COALESCE(EXCLUDED.score,      game_teams.score),
-                won        = COALESCE(EXCLUDED.won,        game_teams.won)
-        """,
-        game_id,
-        team_slot,
-        team_id,
-        side_first,
-        score,
-        won,
-    )
-
-
-def _sha256_file(path: str) -> str | None:
-    try:
-        h = hashlib.sha256()
-        with open(path, "rb") as fh:
-            while chunk := fh.read(65536):
-                h.update(chunk)
-        return h.hexdigest()
-    except OSError:
-        return None
-
-
-async def upsert_game_artifact(
-    *,
-    game_id: str,
-    kind: str,
-    version: str,
-    path: str,
-    content_hash: str | None = None,
-) -> None:
-    pool = await get_pool()
-    managed = config.to_managed_path(path)
-    if content_hash is None:
-        content_hash = _sha256_file(path)
-    await pool.execute(
-        """
-        INSERT INTO game_artifacts (game_id, kind, version, path, content_hash, updated_at)
-        VALUES ($1, $2, $3, $4, $5, NOW())
-        ON CONFLICT (game_id, kind, version) DO UPDATE
-            SET path         = EXCLUDED.path,
-                content_hash = COALESCE(EXCLUDED.content_hash, game_artifacts.content_hash),
-                updated_at   = NOW()
-        """,
-        game_id,
-        kind,
-        version,
-        managed,
-        content_hash,
-    )
-
-
-async def upsert_game_player_stats(
-    *,
-    game_id: str,
-    steam_id: str,
-    team_slot: int | None = None,
-    side_first: str | None = None,
-    rounds_won: int | None = None,
-    rounds_lost: int | None = None,
-    result: str | None = None,
-    kills: int | None = None,
-    deaths: int | None = None,
-    assists: int | None = None,
-    hs_pct: float | None = None,
-) -> None:
-    pool = await get_pool()
-    await pool.execute(
-        """
-        INSERT INTO game_player_stats (
-            game_id, steam_id, team_slot, side_first,
-            rounds_won, rounds_lost, result,
-            kills, deaths, assists, hs_pct
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        ON CONFLICT (game_id, steam_id) DO UPDATE
-            SET team_slot   = COALESCE(EXCLUDED.team_slot,   game_player_stats.team_slot),
-                side_first  = COALESCE(EXCLUDED.side_first,  game_player_stats.side_first),
-                rounds_won  = COALESCE(EXCLUDED.rounds_won,  game_player_stats.rounds_won),
-                rounds_lost = COALESCE(EXCLUDED.rounds_lost, game_player_stats.rounds_lost),
-                result      = COALESCE(EXCLUDED.result,      game_player_stats.result),
-                kills       = COALESCE(EXCLUDED.kills,       game_player_stats.kills),
-                deaths      = COALESCE(EXCLUDED.deaths,      game_player_stats.deaths),
-                assists     = COALESCE(EXCLUDED.assists,      game_player_stats.assists),
-                hs_pct      = COALESCE(EXCLUDED.hs_pct,      game_player_stats.hs_pct)
-        """,
-        game_id, steam_id, team_slot, side_first,
-        rounds_won, rounds_lost, result,
-        kills, deaths, assists, hs_pct,
-    )
-
-
-async def upsert_rounds(game_id: str, rows: list[dict]) -> None:
-    """Upsert round fact rows for a parsed game."""
-    if not rows:
-        return
-    pool = await get_pool()
-    records = [
-        (
-            game_id,
-            row.get("round_num"),
-            row.get("start_tick"),
-            row.get("freeze_end_tick"),
-            row.get("end_tick"),
-            row.get("official_end_tick"),
-            row.get("winner_side"),
-            row.get("reason"),
-            row.get("bomb_plant_tick"),
-            row.get("bomb_site"),
-            row.get("duration_ticks"),
-        )
-        for row in rows
-        if row.get("round_num") is not None
-    ]
-    await pool.executemany(
-        """
-        INSERT INTO rounds (
-            game_id, round_num, start_tick, freeze_end_tick, end_tick,
-            official_end_tick, winner_side, reason, bomb_plant_tick,
-            bomb_site, duration_ticks, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-        ON CONFLICT (game_id, round_num) DO UPDATE
-            SET start_tick        = EXCLUDED.start_tick,
-                freeze_end_tick   = EXCLUDED.freeze_end_tick,
-                end_tick          = EXCLUDED.end_tick,
-                official_end_tick = EXCLUDED.official_end_tick,
-                winner_side       = EXCLUDED.winner_side,
-                reason            = EXCLUDED.reason,
-                bomb_plant_tick   = EXCLUDED.bomb_plant_tick,
-                bomb_site         = EXCLUDED.bomb_site,
-                duration_ticks    = EXCLUDED.duration_ticks,
-                updated_at        = NOW()
-        """,
-        records,
     )
 
 
@@ -471,59 +251,49 @@ async def upsert_pro_game(
     artifact_version: str | None = None,
     window_feature_version: str | None = None,
 ) -> None:
-    """Upsert canonical dimensions/facts for one HLTV-sourced map demo."""
-    match_id = hltv_match_key(hltv_match_id, game_id)
+    """Upsert one HLTV-sourced map demo into the flat games table."""
     external_match_id = str(hltv_match_id or game_id.split("_", 1)[0])
     event_id = await upsert_event_dimension(event_name=event_name, source_type="hltv")
-    await upsert_match_dimension(
-        match_id,
+    team1_id = await upsert_team_dimension(team_name=team1_name, source_type="hltv")
+    team2_id = await upsert_team_dimension(team_name=team2_name, source_type="hltv")
+
+    await upsert_game(
+        game_id,
         source_type="pro",
         match_type="hltv",
+        map_name=map_name,
+        played_at=match_date,
         external_match_id=external_match_id,
         source_url=hltv_url,
         source_slug=source_slug,
         event_id=event_id,
-        played_at=match_date,
-    )
-
-    team1_id = await upsert_team_dimension(team_name=team1_name, source_type="hltv")
-    team2_id = await upsert_team_dimension(team_name=team2_name, source_type="hltv")
-    await link_match_team(match_id=match_id, team_slot=1, team_id=team1_id, source_team_name=team1_name)
-    await link_match_team(match_id=match_id, team_slot=2, team_id=team2_id, source_team_name=team2_name)
-
-    await upsert_game(
-        game_id,
-        match_id=match_id,
-        source_type="pro",
-        map_name=map_name,
+        team1_id=team1_id,
+        team2_id=team2_id,
         map_number=map_number,
         demo_stem=game_id,
-        demo_path=demo_path,
         parquet_dir=str(parquet_dir),
+        artifact_path=artifact_path,
         ct_round_wins=ct_round_wins,
         t_round_wins=t_round_wins,
         round_count=round_count,
         tick_rate=tick_rate,
         parser_version=parser_version,
         artifact_version=artifact_version,
-        window_feature_version=window_feature_version,
+        feature_version=window_feature_version,
         ingest_status="ready",
         ingest_error=None,
         ingested_at=datetime.now(timezone.utc),
+        steam_id=None,
+        share_code=None,
+        user_side_first=None,
+        user_result=None,
+        user_rounds_won=None,
+        user_rounds_lost=None,
+        user_kills=None,
+        user_deaths=None,
+        user_assists=None,
+        user_hs_pct=None,
     )
-
-    # Register teams by slot. Scores are left NULL: ct_round_wins / t_round_wins on
-    # games are side-level stats, not team-level scores — teams switch sides at half.
-    await link_game_team(game_id=game_id, team_slot=1, team_id=team1_id)
-    await link_game_team(game_id=game_id, team_slot=2, team_id=team2_id)
-
-    if artifact_path and artifact_version:
-        await upsert_game_artifact(
-            game_id=game_id,
-            kind="match_artifact",
-            version=artifact_version,
-            path=artifact_path,
-        )
 
 
 async def upsert_user_game(
@@ -543,48 +313,52 @@ async def upsert_user_game(
     tick_rate: int = 64,
     artifact_version: str | None = None,
     window_feature_version: str | None = None,
+    user_side_first: str | None = None,
+    user_result: str | None = None,
+    user_rounds_won: int | None = None,
+    user_rounds_lost: int | None = None,
+    user_kills: int | None = None,
+    user_deaths: int | None = None,
+    user_assists: int | None = None,
+    user_hs_pct: float | None = None,
 ) -> None:
-    """Upsert canonical dimensions/facts for one user-imported map demo.
-
-    match_teams and game_teams are intentionally not populated: user games
-    have no named teams, and every query that joins them uses LEFT JOIN, so
-    callers receive NULL team names rather than crashing.
-    """
-    match_id = user_match_key(game_id)
-    await upsert_match_dimension(
-        match_id,
-        source_type="user",
-        match_type=match_type or "unknown",
-        external_match_id=game_id,
-        share_code=share_code,
-        steam_id=steam_id,
-        played_at=match_date,
-    )
+    """Upsert one user-imported map demo into the flat games table."""
     await upsert_game(
         game_id,
-        match_id=match_id,
         source_type="user",
+        match_type=match_type or "unknown",
         map_name=map_name,
+        played_at=match_date,
         demo_stem=game_id,
-        demo_path=demo_path,
         parquet_dir=str(parquet_dir),
+        artifact_path=artifact_path,
         ct_round_wins=ct_round_wins,
         t_round_wins=t_round_wins,
         round_count=round_count,
         tick_rate=tick_rate,
         artifact_version=artifact_version,
-        window_feature_version=window_feature_version,
+        feature_version=window_feature_version,
         ingest_status="ready",
         ingest_error=None,
         ingested_at=datetime.now(timezone.utc),
+        steam_id=steam_id,
+        share_code=share_code,
+        user_side_first=user_side_first,
+        user_result=user_result,
+        user_rounds_won=user_rounds_won,
+        user_rounds_lost=user_rounds_lost,
+        user_kills=user_kills,
+        user_deaths=user_deaths,
+        user_assists=user_assists,
+        user_hs_pct=user_hs_pct,
+        external_match_id=None,
+        source_url=None,
+        source_slug=None,
+        event_id=None,
+        team1_id=None,
+        team2_id=None,
+        map_number=None,
     )
-    if artifact_path and artifact_version:
-        await upsert_game_artifact(
-            game_id=game_id,
-            kind="match_artifact",
-            version=artifact_version,
-            path=artifact_path,
-        )
 
 
 # ── User game queries ──────────────────────────────────────────────────────────
@@ -596,23 +370,20 @@ async def get_user_matches(steam_id: str, limit: int = 30) -> list[dict]:
         SELECT
             g.game_id        AS demo_id,
             g.map_name,
-            m.match_type,
-            m.played_at      AS match_date,
-            gps.rounds_won   AS score_ct,
-            gps.rounds_lost  AS score_t,
-            gps.side_first   AS user_side_first,
-            gps.result       AS user_result,
-            gps.kills,
-            gps.deaths,
-            gps.assists,
-            gps.hs_pct,
+            g.match_type,
+            g.played_at      AS match_date,
+            COALESCE(g.user_rounds_won, g.ct_round_wins)   AS score_ct,
+            COALESCE(g.user_rounds_lost, g.t_round_wins)   AS score_t,
+            g.user_side_first,
+            g.user_result,
+            g.user_kills     AS kills,
+            g.user_deaths    AS deaths,
+            g.user_assists   AS assists,
+            g.user_hs_pct    AS hs_pct,
             g.round_count
         FROM games g
-        JOIN matches m ON m.match_id = g.match_id
-        LEFT JOIN game_player_stats gps
-               ON gps.game_id = g.game_id AND gps.steam_id = $1
-        WHERE m.steam_id = $1 AND g.source_type = 'user'
-        ORDER BY m.played_at DESC NULLS LAST, g.ingested_at DESC
+        WHERE g.steam_id = $1 AND g.source_type = 'user'
+        ORDER BY g.played_at DESC NULLS LAST, g.ingested_at DESC
         LIMIT $2
         """,
         steam_id, limit,
@@ -621,10 +392,12 @@ async def get_user_matches(steam_id: str, limit: int = 30) -> list[dict]:
 
 
 async def delete_user_game(game_id: str) -> None:
-    """Delete a user game and its parent match (cascades to all child rows)."""
+    """Delete a user game and its child rows."""
     pool = await get_pool()
-    match_id = user_match_key(game_id)
-    await pool.execute("DELETE FROM matches WHERE match_id = $1", match_id)
+    await pool.execute(
+        "DELETE FROM games WHERE game_id = $1 AND source_type = 'user'",
+        game_id,
+    )
 
 
 async def get_match_parquet_dir(demo_id: str) -> tuple[str, str] | None:
@@ -641,42 +414,40 @@ async def get_match_parquet_dir(demo_id: str) -> tuple[str, str] | None:
 
 async def get_match_source_record(match_id: str) -> dict | None:
     """Return a normalized match record for a user or pro game."""
+    records = await get_match_source_records([match_id])
+    return records.get(match_id)
+
+
+async def get_match_source_records(match_ids: list[str]) -> dict[str, dict]:
+    """Return normalized match records for multiple user/pro game IDs."""
+    if not match_ids:
+        return {}
     pool = await get_pool()
-    row = await pool.fetchrow(
+    rows = await pool.fetch(
         """
         SELECT
             g.*,
             g.game_id        AS source_match_id,
-            m.match_type,
-            m.external_match_id,
-            m.source_url     AS hltv_url,
-            m.source_slug,
-            m.share_code,
-            m.steam_id,
-            m.played_at      AS match_date,
+            g.source_url     AS hltv_url,
+            g.played_at      AS match_date,
+            g.feature_version AS window_feature_version,
             e.event_name,
             t1.team_name     AS team1_name,
             t2.team_name     AS team2_name,
             t1.team_name     AS team_ct,
-            t2.team_name     AS team_t,
-            ga.path          AS artifact_path
+            t2.team_name     AS team_t
         FROM games g
-        JOIN matches m ON m.match_id = g.match_id
-        LEFT JOIN events e ON e.event_id = m.event_id
-        LEFT JOIN match_teams mt1 ON mt1.match_id = m.match_id AND mt1.team_slot = 1
-        LEFT JOIN teams t1 ON t1.team_id = mt1.team_id
-        LEFT JOIN match_teams mt2 ON mt2.match_id = m.match_id AND mt2.team_slot = 2
-        LEFT JOIN teams t2 ON t2.team_id = mt2.team_id
-        LEFT JOIN LATERAL (
-            SELECT path FROM game_artifacts
-            WHERE game_id = g.game_id AND kind = 'match_artifact'
-            ORDER BY updated_at DESC LIMIT 1
-        ) ga ON TRUE
-        WHERE g.game_id = $1
+        LEFT JOIN events e ON e.event_id = g.event_id
+        LEFT JOIN teams t1 ON t1.team_id = g.team1_id
+        LEFT JOIN teams t2 ON t2.team_id = g.team2_id
+        WHERE g.game_id = ANY($1::text[])
         """,
-        match_id,
+        match_ids,
     )
-    return _normalize_path_fields(dict(row), "parquet_dir", "artifact_path") if row else None
+    return {
+        row["source_match_id"]: _normalize_path_fields(dict(row), "parquet_dir", "artifact_path")
+        for row in rows
+    }
 
 
 # ── Pro game queries ───────────────────────────────────────────────────────────
@@ -697,10 +468,10 @@ async def get_pro_matches(limit: int | None = None) -> list[dict]:
             g.game_id        AS match_id,
             g.map_name,
             g.parquet_dir,
-            ga.path          AS artifact_path,
-            m.played_at      AS match_date,
+            g.artifact_path,
+            g.played_at      AS match_date,
             e.event_name,
-            m.source_url     AS hltv_url,
+            g.source_url     AS hltv_url,
             t1.team_name     AS team1_name,
             t2.team_name     AS team2_name,
             t1.team_name     AS team_ct,
@@ -710,17 +481,9 @@ async def get_pro_matches(limit: int | None = None) -> list[dict]:
             g.round_count,
             g.ingested_at
         FROM games g
-        JOIN matches m ON m.match_id = g.match_id
-        LEFT JOIN events e ON e.event_id = m.event_id
-        LEFT JOIN match_teams mt1 ON mt1.match_id = m.match_id AND mt1.team_slot = 1
-        LEFT JOIN teams t1 ON t1.team_id = mt1.team_id
-        LEFT JOIN match_teams mt2 ON mt2.match_id = m.match_id AND mt2.team_slot = 2
-        LEFT JOIN teams t2 ON t2.team_id = mt2.team_id
-        LEFT JOIN LATERAL (
-            SELECT path FROM game_artifacts
-            WHERE game_id = g.game_id AND kind = 'match_artifact'
-            ORDER BY updated_at DESC LIMIT 1
-        ) ga ON TRUE
+        LEFT JOIN events e ON e.event_id = g.event_id
+        LEFT JOIN teams t1 ON t1.team_id = g.team1_id
+        LEFT JOIN teams t2 ON t2.team_id = g.team2_id
         WHERE g.source_type = 'pro'
         ORDER BY g.ingested_at DESC NULLS LAST, g.updated_at DESC
     """
@@ -735,18 +498,20 @@ async def get_pro_matches(limit: int | None = None) -> list[dict]:
 # ── Artifact path helpers ──────────────────────────────────────────────────────
 
 async def set_match_artifact_path(source_type: str, source_match_id: str, artifact_path: str) -> None:
-    """Store the artifact_path for a pro or user game in game_artifacts."""
+    """Store the current match artifact path on the game row."""
     from pipeline.steps.build_artifact import ARTIFACT_VERSION
-    await upsert_game_artifact(
-        game_id=source_match_id,
-        kind="match_artifact",
-        version=ARTIFACT_VERSION,
-        path=artifact_path,
-    )
     pool = await get_pool()
     await pool.execute(
-        "UPDATE games SET artifact_version = $1, updated_at = NOW() WHERE game_id = $2",
+        """
+        UPDATE games
+        SET artifact_path = $1,
+            artifact_version = $2,
+            updated_at = NOW()
+        WHERE source_type = $3 AND game_id = $4
+        """,
+        config.to_managed_path(artifact_path),
         ARTIFACT_VERSION,
+        source_type,
         source_match_id,
     )
 
@@ -786,11 +551,11 @@ async def upsert_event_windows_batch(windows: list[dict]) -> None:
         w = dict(w)
         w.pop("source_type", None)
         w.pop("source_match_id", None)
+        w.pop("steam_id", None)
         embedding = w.pop("embedding", None)
         records.append((
             w.get("window_id"),
             w.get("game_id"),
-            w.get("steam_id"),
             w.get("map_name"),
             w.get("round_num"),
             w.get("start_tick"),
@@ -803,23 +568,22 @@ async def upsert_event_windows_batch(windows: list[dict]) -> None:
             w.get("alive_ct"),
             w.get("alive_t"),
             w.get("feature_version"),
-            w.get("feature_path"),
+            config.to_managed_path(w.get("feature_path")) if w.get("feature_path") else None,
             _format_embedding(embedding) if embedding is not None else None,
         ))
     await pool.executemany(
         """
         INSERT INTO event_windows (
-            window_id, game_id, steam_id, map_name, round_num,
+            window_id, game_id, map_name, round_num,
             start_tick, anchor_tick, end_tick, side_to_query,
             phase, site, anchor_kind, alive_ct, alive_t,
             feature_version, feature_path, embedding
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9,
-            $10, $11, $12, $13, $14, $15, $16, $17::vector(54)
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, $12, $13, $14, $15, $16::vector(54)
         )
         ON CONFLICT (window_id) DO UPDATE SET
             game_id         = EXCLUDED.game_id,
-            steam_id        = EXCLUDED.steam_id,
             map_name        = EXCLUDED.map_name,
             round_num       = EXCLUDED.round_num,
             start_tick      = EXCLUDED.start_tick,
@@ -846,8 +610,11 @@ async def upsert_event_window(window_id: str, **kwargs) -> None:
     # Drop legacy fields that were removed from the schema.
     kwargs.pop("source_type", None)
     kwargs.pop("source_match_id", None)
+    kwargs.pop("steam_id", None)
 
     embedding = kwargs.pop("embedding", None)
+    if kwargs.get("feature_path"):
+        kwargs["feature_path"] = config.to_managed_path(kwargs["feature_path"])
 
     cols = ["window_id"] + list(kwargs.keys())
     params: list = [window_id] + list(kwargs.values())
@@ -945,7 +712,8 @@ async def ann_search_event_windows(
 
     params.append(limit)
     query = (
-        "SELECT ew.*, ew.game_id AS source_match_id, g.source_type "
+        "SELECT ew.*, ew.game_id AS source_match_id, g.source_type, "
+        f"       (ew.embedding <=> $1::vector({VECTOR_DIM})) AS cosine_distance "
         "FROM event_windows ew "
         "JOIN games g ON g.game_id = ew.game_id "
         f"WHERE {' AND '.join(filters)} "
@@ -958,77 +726,45 @@ async def ann_search_event_windows(
 
 # ── Round analysis cache ───────────────────────────────────────────────────────
 
-async def get_round_analysis_result(cache_key: str) -> dict | None:
+def _round_analysis_row(row) -> dict:
+    payload = dict(row)
+    payload["demo_id"] = payload["game_id"]
+    return payload
+
+
+async def get_round_analysis_result(demo_id: str, round_num: int) -> dict | None:
     pool = await get_pool()
     row = await pool.fetchrow(
-        "SELECT * FROM round_analysis_results WHERE cache_key = $1",
-        cache_key,
+        "SELECT * FROM round_analysis_cache WHERE game_id = $1 AND round_num = $2",
+        demo_id,
+        round_num,
     )
-    return dict(row) if row else None
+    return _round_analysis_row(row) if row else None
 
 
 async def get_round_analysis_result_state(
     *,
     demo_id: str,
     round_num: int,
-    logic: str,
-    matcher_version: str,
-    pro_corpus_version: str,
 ) -> dict:
-    cache_key = f"{demo_id}:{round_num}:{logic}:{pro_corpus_version}:{matcher_version}"
-    exact = await get_round_analysis_result(cache_key)
-    if exact is not None:
-        if exact.get("invalidated_at") is None:
-            return {
-                "cache_key": cache_key,
-                "cache_status": "pending" if exact.get("status") == "pending" else "fresh",
-                "result": exact,
-                "stale_result": None,
-            }
-        return {
-            "cache_key": cache_key,
-            "cache_status": "stale",
-            "result": None,
-            "stale_result": exact,
-        }
-
+    """Return one of: fresh, pending, missing — with the cached row if any."""
     pool = await get_pool()
     row = await pool.fetchrow(
-        """
-        SELECT *
-        FROM round_analysis_results
-        WHERE demo_id = $1 AND round_num = $2 AND logic = $3
-        ORDER BY updated_at DESC, created_at DESC
-        LIMIT 1
-        """,
+        "SELECT * FROM round_analysis_cache WHERE game_id = $1 AND round_num = $2",
         demo_id,
         round_num,
-        logic,
     )
-    if row is not None:
-        return {
-            "cache_key": cache_key,
-            "cache_status": "stale",
-            "result": None,
-            "stale_result": dict(row),
-        }
-
-    return {
-        "cache_key": cache_key,
-        "cache_status": "missing",
-        "result": None,
-        "stale_result": None,
-    }
+    if row is None:
+        return {"cache_status": "missing", "result": None}
+    payload = _round_analysis_row(row)
+    cache_status = "pending" if payload.get("status") == "pending" else "fresh"
+    return {"cache_status": cache_status, "result": payload}
 
 
 async def upsert_round_analysis_result(
     *,
-    cache_key: str,
     demo_id: str,
     round_num: int,
-    logic: str,
-    matcher_version: str,
-    pro_corpus_version: str,
     status: str,
     result_payload: dict | None = None,
     error_message: str | None = None,
@@ -1036,27 +772,18 @@ async def upsert_round_analysis_result(
     pool = await get_pool()
     await pool.execute(
         """
-        INSERT INTO round_analysis_results (
-            cache_key, demo_id, round_num, logic, matcher_version, pro_corpus_version,
-            status, result_json, error_message, invalidated_at, updated_at
+        INSERT INTO round_analysis_cache (
+            game_id, round_num, status, result_json, error_message, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NOW())
-        ON CONFLICT (cache_key)
-        DO UPDATE SET
-            matcher_version    = EXCLUDED.matcher_version,
-            pro_corpus_version = EXCLUDED.pro_corpus_version,
-            status             = EXCLUDED.status,
-            result_json        = EXCLUDED.result_json,
-            error_message      = EXCLUDED.error_message,
-            invalidated_at     = NULL,
-            updated_at         = NOW()
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT (game_id, round_num) DO UPDATE SET
+            status        = EXCLUDED.status,
+            result_json   = EXCLUDED.result_json,
+            error_message = EXCLUDED.error_message,
+            updated_at    = NOW()
         """,
-        cache_key,
         demo_id,
         round_num,
-        logic,
-        matcher_version,
-        pro_corpus_version,
         status,
         json.dumps(result_payload) if result_payload is not None else None,
         error_message,
@@ -1074,12 +801,19 @@ async def create_demo_job(
     match_type: str,
 ) -> None:
     pool = await get_pool()
+    coerced_match_type = _coerce_match_type(match_type)
+    if coerced_match_type == "hltv":
+        coerced_match_type = "unknown"
     await pool.execute(
         """
-        INSERT INTO demo_jobs (job_id, steam_id, demo_path, demo_id, match_type)
+        INSERT INTO demo_jobs (job_id, steam_id, demo_path, game_id, match_type)
         VALUES ($1, $2, $3, $4, $5)
         """,
-        job_id, steam_id, demo_path, demo_id, match_type,
+        job_id,
+        steam_id,
+        config.to_managed_path(demo_path),
+        demo_id,
+        coerced_match_type,
     )
 
 
@@ -1097,7 +831,7 @@ async def claim_demo_job() -> dict | None:
             LIMIT 1
             FOR UPDATE SKIP LOCKED
         )
-        RETURNING *
+        RETURNING *, game_id AS demo_id
         """
     )
     return dict(row) if row else None
@@ -1127,7 +861,7 @@ async def finish_demo_job(
 async def get_demo_job(job_id: str) -> dict | None:
     pool = await get_pool()
     row = await pool.fetchrow(
-        "SELECT * FROM demo_jobs WHERE job_id = $1", job_id
+        "SELECT *, game_id AS demo_id FROM demo_jobs WHERE job_id = $1", job_id
     )
     return dict(row) if row else None
 

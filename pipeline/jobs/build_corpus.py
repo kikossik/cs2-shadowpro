@@ -83,9 +83,7 @@ async def build_corpus(limit: int | None = None, force: bool = False) -> dict:
                     stem=match_id,
                     map_name=match["map_name"],
                 )
-                for window in windows:
-                    window_id = window.pop("window_id")
-                    await db.upsert_event_window(window_id, **window)
+                await db.upsert_event_windows_batch(windows)
 
                 processed += 1
                 log.info("%s -> %s, %d windows", match_id, ARTIFACT_VERSION, len(windows))
