@@ -60,6 +60,11 @@ def _search_path() -> str:
     return f"{schema}, public"
 
 
+def connection_settings() -> dict:
+    """Asyncpg connection settings shared by every direct connection/pool."""
+    return {"server_settings": {"search_path": _search_path()}}
+
+
 async def get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
@@ -67,7 +72,7 @@ async def get_pool() -> asyncpg.Pool:
             dsn=config.DATABASE_URL,
             min_size=2,
             max_size=10,
-            server_settings={"search_path": _search_path()},
+            **connection_settings(),
         )
     return _pool
 
@@ -504,7 +509,7 @@ async def get_round_analysis_result_state(
     demo_id: str,
     round_num: int,
 ) -> dict:
-    """Return one of: fresh, pending, missing — with the cached row if any."""
+    """Return one of: fresh, pending, retryable, missing — with the cached row if any."""
     pool = await get_pool()
     row = await pool.fetchrow(
         "SELECT * FROM round_analysis_cache WHERE game_id = $1 AND round_num = $2",
@@ -514,7 +519,12 @@ async def get_round_analysis_result_state(
     if row is None:
         return {"cache_status": "missing", "result": None}
     payload = _round_analysis_row(row)
-    cache_status = "pending" if payload.get("status") == "pending" else "fresh"
+    if payload.get("status") == "done" and payload.get("result_json") is not None:
+        cache_status = "fresh"
+    elif payload.get("status") == "pending":
+        cache_status = "pending"
+    else:
+        cache_status = "retryable"
     return {"cache_status": cache_status, "result": payload}
 
 

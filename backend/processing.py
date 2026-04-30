@@ -167,7 +167,12 @@ async def _save_match(demo_id: str, game_kwargs: dict) -> None:
     # event loop. The global db._pool was created in FastAPI's main event loop and
     # cannot be used from a different loop, so we create a fresh pool here.
     import asyncpg as _asyncpg
-    pool = await _asyncpg.create_pool(dsn=config.DATABASE_URL, min_size=1, max_size=2)
+    pool = await _asyncpg.create_pool(
+        dsn=config.DATABASE_URL,
+        min_size=1,
+        max_size=2,
+        **db.connection_settings(),
+    )
     orig_pool = db._pool
     db._pool = pool
     try:

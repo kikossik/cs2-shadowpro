@@ -620,6 +620,23 @@ def _nearest_tick(target: int, available_ticks: np.ndarray) -> int:
     return before if abs(target - before) <= abs(after - target) else after
 
 
+def _round_tick_value(round_row: dict[str, Any], key: str, default: int = 0) -> int:
+    value = round_row.get(key)
+    if value is None:
+        return default
+    if isinstance(value, float) and math.isnan(value):
+        return default
+    return int(value)
+
+
+def _round_freeze_end_tick(round_row: dict[str, Any], default: int = 0) -> int:
+    return _round_tick_value(
+        round_row,
+        "freeze_end",
+        _round_tick_value(round_row, "start", default),
+    )
+
+
 def _distance_xy(a: Sequence[float], b: Sequence[float]) -> float:
     """Compute 2D distance between two `(x, y)` points.
 
@@ -714,8 +731,8 @@ def build_team_window_catalog(
         if available_ticks.size == 0:
             continue
 
-        start_tick = int(round_row["freeze_end"] or round_row["start"])
-        end_tick = int(round_row["end"])
+        start_tick = _round_freeze_end_tick(round_row, int(available_ticks[0]))
+        end_tick = _round_tick_value(round_row, "end", int(available_ticks[-1]))
         if end_tick - start_tick < window_ticks:
             continue
 
@@ -855,6 +872,8 @@ def _build_team_window_features(
 
     t_weapon_profile = dict(Counter(t_weapon_families))
     ct_weapon_profile = dict(Counter(ct_weapon_families))
+    freeze_end_tick = _round_freeze_end_tick(round_row, int(window_start))
+    round_end_tick = _round_tick_value(round_row, "end", int(window_end))
 
     row: dict[str, Any] = {
         "role": artifacts.role,
@@ -868,9 +887,9 @@ def _build_team_window_features(
         "window_end_tick": int(window_end),
         "window_mid_tick": window_mid_tick,
         "window_duration_sec": (window_end - window_start) / artifacts.tickrate,
-        "window_start_sec_from_freeze": (window_start - int(round_row["freeze_end"])) / artifacts.tickrate,
-        "window_end_sec_from_freeze": (window_end - int(round_row["freeze_end"])) / artifacts.tickrate,
-        "round_duration_sec": (int(round_row["end"]) - int(round_row["freeze_end"])) / artifacts.tickrate,
+        "window_start_sec_from_freeze": (window_start - freeze_end_tick) / artifacts.tickrate,
+        "window_end_sec_from_freeze": (window_end - freeze_end_tick) / artifacts.tickrate,
+        "round_duration_sec": (round_end_tick - freeze_end_tick) / artifacts.tickrate,
         "bomb_planted_ratio": bomb_planted_ratio,
         "planted": planted,
         "site": site,
@@ -2268,8 +2287,8 @@ def _sample_round_ticks(
         return []
     meta = round_row.row(0, named=True)
 
-    freeze_end_tick = int(meta["freeze_end"] or meta["start"])
-    end_tick = int(meta["end"])
+    freeze_end_tick = _round_freeze_end_tick(meta)
+    end_tick = _round_tick_value(meta, "end", freeze_end_tick)
     available_ticks = np.array(sorted(set(int(v) for v in round_ticks["tick"].to_list())), dtype=np.int32)
     if available_ticks.size == 0:
         return []

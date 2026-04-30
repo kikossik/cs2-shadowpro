@@ -12,7 +12,7 @@ from pathlib import Path
 import asyncpg
 import httpx
 
-from backend import config
+from backend import config, db
 from backend.processing import process_demo
 
 _SHARE_CODE_API = (
@@ -23,7 +23,7 @@ _SHARE_CODE_API = (
 # ── DB helpers (standalone connections — runs in a thread pool) ────────────────
 
 async def _get_user(steam_id: str) -> dict | None:
-    conn = await asyncpg.connect(dsn=config.DATABASE_URL)
+    conn = await asyncpg.connect(dsn=config.DATABASE_URL, **db.connection_settings())
     try:
         row = await conn.fetchrow("SELECT * FROM users WHERE steam_id = $1", steam_id)
         return dict(row) if row else None
@@ -32,7 +32,7 @@ async def _get_user(steam_id: str) -> dict | None:
 
 
 async def _update_share_code(steam_id: str, code: str) -> None:
-    conn = await asyncpg.connect(dsn=config.DATABASE_URL)
+    conn = await asyncpg.connect(dsn=config.DATABASE_URL, **db.connection_settings())
     try:
         await conn.execute(
             "UPDATE users SET last_share_code = $2, updated_at = NOW() WHERE steam_id = $1",
@@ -133,7 +133,9 @@ def sync_user(steam_id: str) -> dict:
     sid = int(steam_id)
     lock_loop = asyncio.new_event_loop()
     try:
-        conn = lock_loop.run_until_complete(asyncpg.connect(dsn=config.DATABASE_URL))
+        conn = lock_loop.run_until_complete(
+            asyncpg.connect(dsn=config.DATABASE_URL, **db.connection_settings())
+        )
         try:
             acquired = lock_loop.run_until_complete(
                 conn.fetchval("SELECT pg_try_advisory_lock($1::bigint)", sid)
