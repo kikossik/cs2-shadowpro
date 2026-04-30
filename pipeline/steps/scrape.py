@@ -46,20 +46,28 @@ def _browser_launch_kwargs() -> dict:
     }
 
 
-async def _wait_past_cloudflare(page, timeout_ms: int = 30_000) -> None:
+async def _wait_past_cloudflare(page, timeout_ms: int = 30_000) -> bool:
     """Poll until page title is no longer Cloudflare's challenge page."""
     try:
         await page.wait_for_function(
-            "() => !document.title.toLowerCase().includes('just a moment')",
+            """() => {
+                const title = document.title.toLowerCase();
+                const body = (document.body?.innerText || '').toLowerCase();
+                return !title.includes('just a moment')
+                    && !body.includes('verify you are human')
+                    && !body.includes('checking your browser');
+            }""",
             timeout=timeout_ms,
         )
+        return True
     except PlaywrightTimeout:
-        pass  # caller will see the failure via missing content
+        return False
 
 
 async def _collect_match_urls(page, limit: int, results_url: str) -> list[str]:
     await page.goto(results_url, wait_until="domcontentloaded", timeout=30_000)
-    await _wait_past_cloudflare(page)
+    if not await _wait_past_cloudflare(page):
+        log.warning("Cloudflare challenge did not clear on results page: %s", await page.title())
     await page.wait_for_timeout(2_000)
 
     all_hrefs: list[str] = await page.evaluate(
@@ -89,7 +97,10 @@ async def _get_match_info(page, match_url: str) -> dict:
     }
     try:
         await page.goto(match_url, wait_until="domcontentloaded", timeout=20_000)
-        await _wait_past_cloudflare(page)
+        if not await _wait_past_cloudflare(page):
+            title = await page.title()
+            result["error"] = f"cloudflare challenge not passed (title={title!r})"
+            return result
         await page.wait_for_timeout(2_000)
 
         info = await page.evaluate("""() => {

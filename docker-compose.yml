@@ -1,10 +1,15 @@
+x-la-timezone: &la-timezone
+  TZ: America/Los_Angeles
+
 services:
 
   #
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    command: ["postgres", "-c", "log_timezone=America/Los_Angeles"]
     environment:
+      <<: *la-timezone
       POSTGRES_DB: cs2shadowpro
       POSTGRES_USER: cs2shadowpro
       POSTGRES_PASSWORD: cs2shadowpro
@@ -28,6 +33,7 @@ services:
       - path: .env
         required: false
     environment:
+      <<: *la-timezone
       RESOLVER_PORT: "3001"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3001/health >/dev/null"]
@@ -45,6 +51,7 @@ services:
       - path: .env
         required: false
     environment:
+      <<: *la-timezone
       DATABASE_URL: postgresql://cs2shadowpro:cs2shadowpro@db/cs2shadowpro
       RESOLVER_URL: http://resolver:3001
     ports:
@@ -70,6 +77,7 @@ services:
       - path: .env
         required: false
     environment:
+      <<: *la-timezone
       DATABASE_URL: postgresql://cs2shadowpro:cs2shadowpro@db/cs2shadowpro
       RESOLVER_URL: http://resolver:3001
       SYNC_INTERVAL_SECONDS: "300"
@@ -100,8 +108,9 @@ services:
       - path: .env
         required: false
     environment:
+      <<: *la-timezone
       DATABASE_URL: postgresql://cs2shadowpro:cs2shadowpro@db/cs2shadowpro
-      PLAYWRIGHT_HEADLESS: "1"
+      PLAYWRIGHT_HEADLESS: "${PLAYWRIGHT_HEADLESS:-1}"
     volumes:
       - ./demos_pro:/app/demos_pro
       - ./parquet_pro:/app/parquet_pro
@@ -116,6 +125,8 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     restart: unless-stopped
+    environment:
+      <<: *la-timezone
     ports:
       - "4173:80"
     depends_on:
