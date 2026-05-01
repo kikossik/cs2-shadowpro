@@ -33,6 +33,15 @@ from tests.zones import ALL_ZONES, zone_for
 EARLY_WINDOW_SEC: float = 40.0
 SAMPLE_HZ: float = 4.0  # 4 samples / sec is plenty for macro intent
 
+# Sub-windows for the windowed-min comparison. The min across these windows is
+# what enters scoring, so a round that "starts similar then diverges" loses
+# more points than a round that stays aligned the whole way through.
+WINDOWS_SEC: tuple[tuple[float, float], ...] = (
+    (0.0, 10.0),
+    (10.0, 25.0),
+    (25.0, 40.0),
+)
+
 # Scoring weights — match the user's proposal verbatim.
 W_ENEMY = 0.45
 W_ALLY  = 0.25
@@ -41,6 +50,24 @@ W_COACH = 0.10
 
 # Hard-reject when both sides confidently know the enemy bombsite intent and they differ.
 SITE_CONF_GATE = 0.7
+
+# Economy buckets — derived from focal player's `round_start_equip_value`.
+# Allowed inter-bucket distance is 1; pistol↔full_buy gets hard-rejected.
+ECON_BUCKETS = ("pistol", "eco", "force", "full_buy")
+# upper exclusive bound for each bucket (last one is +inf)
+ECON_THRESHOLDS = (1500.0, 2500.0, 3800.0)
+ECON_MAX_DISTANCE = 1
+
+
+def _econ_bucket(equip_value: float) -> str:
+    for bucket, hi in zip(ECON_BUCKETS, ECON_THRESHOLDS):
+        if equip_value < hi:
+            return bucket
+    return ECON_BUCKETS[-1]
+
+
+def _econ_distance(a: str, b: str) -> int:
+    return abs(ECON_BUCKETS.index(a) - ECON_BUCKETS.index(b))
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +87,10 @@ class RoundSignature:
     first_contact_side: str   # 'a' | 'b' | 'mid' | 'spawn'
     enemy_zone_hist: dict[str, float]
     ally_zone_hist:  dict[str, float]
+    # Per-window histograms for the windowed-min comparison (one entry per WINDOWS_SEC bucket).
+    enemy_zone_hist_windows: list[dict[str, float]]
+    ally_zone_hist_windows:  list[dict[str, float]]
+    focal_zone_hist_windows: list[dict[str, float]]
     enemy_site_intent: str    # 'a' | 'b' | 'mid' | 'unclear'
     enemy_site_conf:   float  # [0,1]
     enemy_centroid_end: tuple[float, float]
@@ -68,6 +99,8 @@ class RoundSignature:
     freeze_end_tick: int
     end_tick: int
     tick_rate: int
+    econ_bucket: str = "full_buy"
+    econ_value:  float = 0.0
     round_outcome_reason: str = ""
 
     def macro_features(self) -> tuple[str, str, dict[str, float], dict[str, float], str]:
@@ -177,18 +210,28 @@ def build_signature(
     if rt.height == 0:
         return None
 
-    # Down-sample: keep one sample every (tick_rate / SAMPLE_HZ) ticks.
+    # Down-sample: keep one sample every (tick_rate / SAMPLE_HZ) ticks; tag a
+    # second-from-freeze-end column for the windowed comparisons.
     step = max(1, int(tr / SAMPLE_HZ))
-    rt = rt.with_columns(((pl.col("tick") - win_start) // step).alias("_bin"))
+    rt = rt.with_columns(
+        ((pl.col("tick") - win_start) // step).alias("_bin"),
+        ((pl.col("tick") - win_start).cast(pl.Float64) / float(tr)).alias("_t_sec"),
+    )
 
     ally = rt.filter(pl.col("side") == side)
     enemy = rt.filter(pl.col("side") == enemy_side)
 
     # Zone histograms over the window — only count alive players.
-    def hist(df: pl.DataFrame) -> dict[str, float]:
+
+    def hist(df: pl.DataFrame, t_lo: float | None = None, t_hi: float | None = None) -> dict[str, float]:
         if df.height == 0:
             return {z: 0.0 for z in ALL_ZONES}
-        alive = df.filter(pl.col("is_alive"))
+        sub = df
+        if t_lo is not None:
+            sub = sub.filter((pl.col("_t_sec") >= t_lo) & (pl.col("_t_sec") < t_hi))
+        if sub.height == 0:
+            return {z: 0.0 for z in ALL_ZONES}
+        alive = sub.filter(pl.col("is_alive"))
         counts: dict[str, float] = {z: 0.0 for z in ALL_ZONES}
         for place in alive["place"].to_list():
             zone, _ = zone_for(place)
@@ -197,8 +240,26 @@ def build_signature(
 
     ally_hist = hist(ally)
     enemy_hist = hist(enemy)
+    focal_df = rt.filter(pl.col("steamid") == focal_steamid)
+
+    enemy_hist_windows = [hist(enemy, lo, hi) for lo, hi in WINDOWS_SEC]
+    ally_hist_windows  = [hist(ally,  lo, hi) for lo, hi in WINDOWS_SEC]
+    focal_hist_windows = [hist(focal_df, lo, hi) for lo, hi in WINDOWS_SEC]
 
     intent, intent_conf = _infer_site_intent(enemy_hist)
+
+    # Economy bucket from the focal player's actual loadout once buys settle
+    # (round_start_equip_value excludes freeze-time purchases; current_equip_value
+    # at ~5s after freeze-end captures the rifle/utility they actually have).
+    equip_val = 0.0
+    if focal_df.height > 0 and "current_equip_value" in focal_df.columns:
+        target = win_start + 5 * tr
+        sample = focal_df.filter(pl.col("tick") >= target).select("current_equip_value").drop_nulls().head(1)
+        if sample.height == 0:
+            sample = focal_df.select("current_equip_value").drop_nulls().tail(1)
+        if sample.height > 0:
+            equip_val = float(sample.item())
+    econ_bucket = _econ_bucket(equip_val)
 
     # Enemy centroid at the end of the window (last bin, alive only)
     last_bin = rt["_bin"].max()
@@ -246,6 +307,9 @@ def build_signature(
         first_contact_side=fc_side,
         enemy_zone_hist=enemy_hist,
         ally_zone_hist=ally_hist,
+        enemy_zone_hist_windows=enemy_hist_windows,
+        ally_zone_hist_windows=ally_hist_windows,
+        focal_zone_hist_windows=focal_hist_windows,
         enemy_site_intent=intent,
         enemy_site_conf=float(intent_conf),
         enemy_centroid_end=(cx, cy),
@@ -254,6 +318,8 @@ def build_signature(
         freeze_end_tick=int(win_start),
         end_tick=int(round_row.get("official_end") or round_row.get("end") or win_end),
         tick_rate=int(tr),
+        econ_bucket=econ_bucket,
+        econ_value=equip_val,
         round_outcome_reason=str(round_row.get("reason") or ""),
     )
 
@@ -294,29 +360,29 @@ def build_all_signatures(
 # Scoring
 # ---------------------------------------------------------------------------
 
-def _focal_route_match(user_track: Sequence[tuple[float, float, float]],
-                       pro_track:  Sequence[tuple[float, float, float]]) -> float:
-    """Mean-aligned distance between resampled tracks. Returns similarity in [0,1]."""
-    if not user_track or not pro_track:
-        return 0.0
-    # Resample both onto a common grid 0..EARLY_WINDOW_SEC at SAMPLE_HZ
-    grid = np.arange(0.0, EARLY_WINDOW_SEC, 1.0 / SAMPLE_HZ)
+def _hist_is_empty(h: dict[str, float]) -> bool:
+    return sum(h.values()) <= 1e-9
 
-    def resample(track: Sequence[tuple[float, float, float]]) -> np.ndarray:
-        ts = np.array([p[0] for p in track])
-        xs = np.array([p[1] for p in track])
-        ys = np.array([p[2] for p in track])
-        if len(ts) < 2:
-            return np.zeros((len(grid), 2))
-        rx = np.interp(grid, ts, xs, left=xs[0], right=xs[-1])
-        ry = np.interp(grid, ts, ys, left=ys[0], right=ys[-1])
-        return np.stack([rx, ry], axis=1)
 
-    a = resample(user_track)
-    b = resample(pro_track)
-    d = np.linalg.norm(a - b, axis=1)  # world units
-    # Mirage's diagonal is roughly 4500u; collapse to similarity.
-    return float(np.exp(-np.mean(d) / 1200.0))
+def _windowed_min_similarity(
+    a_windows: Sequence[dict[str, float]],
+    b_windows: Sequence[dict[str, float]],
+) -> tuple[float, list[float]]:
+    """Min similarity across paired sub-windows.
+
+    Windows in which either side has no alive data (e.g. the focal player is
+    already dead) are skipped — otherwise an empty histogram zeros out the min
+    across the board and every candidate looks equally bad. If every window is
+    empty on at least one side, fall back to 0.
+    """
+    per: list[float] = []
+    for a, b in zip(a_windows, b_windows):
+        if _hist_is_empty(a) or _hist_is_empty(b):
+            continue
+        per.append(_hist_similarity(a, b))
+    if not per:
+        return 0.0, []
+    return float(min(per)), per
 
 
 def _outcome_match(user: RoundSignature, pro: RoundSignature) -> float:
@@ -329,11 +395,24 @@ def _outcome_match(user: RoundSignature, pro: RoundSignature) -> float:
 
 
 def score_pair(user: RoundSignature, pro: RoundSignature) -> dict[str, float]:
-    """Return per-component scores plus the final score and a hard_reject flag."""
+    """Return per-component scores plus the final score and a hard_reject flag.
+
+    Macro components are min-pooled across WINDOWS_SEC sub-windows, so a round
+    that "starts the same and diverges" cannot ride a high early-window score
+    into a top match.
+    """
     # Side must match: a CT round must be coached against a CT pro round.
     if user.user_side != pro.user_side:
         return {"final": 0.0, "hard_reject": 1.0, "reason_side": 1.0,
-                "enemy": 0.0, "ally": 0.0, "focal": 0.0, "coach": 0.0}
+                "enemy": 0.0, "ally": 0.0, "focal": 0.0, "coach": 0.0,
+                "econ_distance": float(_econ_distance(user.econ_bucket, pro.econ_bucket))}
+
+    # Economy gate: pistol↔full_buy and any 2-step jump are rejected.
+    econ_dist = _econ_distance(user.econ_bucket, pro.econ_bucket)
+    if econ_dist > ECON_MAX_DISTANCE:
+        return {"final": 0.0, "hard_reject": 1.0, "reason_econ": 1.0,
+                "enemy": 0.0, "ally": 0.0, "focal": 0.0, "coach": 0.0,
+                "econ_distance": float(econ_dist)}
 
     # Hard gate on confident enemy-site mismatch.
     site_gate = (
@@ -344,21 +423,26 @@ def score_pair(user: RoundSignature, pro: RoundSignature) -> dict[str, float]:
         and user.enemy_site_intent != pro.enemy_site_intent
     )
 
-    enemy = _hist_similarity(user.enemy_zone_hist, pro.enemy_zone_hist)
-    ally  = _hist_similarity(user.ally_zone_hist,  pro.ally_zone_hist)
-    focal = _focal_route_match(user.focal_track, pro.focal_track)
+    enemy, enemy_per = _windowed_min_similarity(user.enemy_zone_hist_windows, pro.enemy_zone_hist_windows)
+    ally,  ally_per  = _windowed_min_similarity(user.ally_zone_hist_windows,  pro.ally_zone_hist_windows)
+    focal, focal_per = _windowed_min_similarity(user.focal_zone_hist_windows, pro.focal_zone_hist_windows)
     coach = _outcome_match(user, pro)
 
     final = W_ENEMY * enemy + W_ALLY * ally + W_FOCAL * focal + W_COACH * coach
 
     if site_gate:
         return {"final": 0.0, "hard_reject": 1.0, "reason_intent": 1.0,
-                "enemy": enemy, "ally": ally, "focal": focal, "coach": coach}
+                "enemy": enemy, "ally": ally, "focal": focal, "coach": coach,
+                "econ_distance": float(econ_dist)}
 
     # Soft penalty when first-contact side disagrees in non-spawn cases.
     if user.first_contact_side in ("a", "b") and pro.first_contact_side in ("a", "b") \
             and user.first_contact_side != pro.first_contact_side:
         final *= 0.7
+
+    # Soft penalty for a 1-step economy gap (full_buy vs force still scores, just discounted).
+    if econ_dist == 1:
+        final *= 0.92
 
     return {
         "final": float(final),
@@ -367,6 +451,10 @@ def score_pair(user: RoundSignature, pro: RoundSignature) -> dict[str, float]:
         "ally": float(ally),
         "focal": float(focal),
         "coach": float(coach),
+        "econ_distance": float(econ_dist),
+        "enemy_per_window": enemy_per,
+        "ally_per_window": ally_per,
+        "focal_per_window": focal_per,
     }
 
 

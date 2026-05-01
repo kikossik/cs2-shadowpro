@@ -63,11 +63,20 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"  found {len(pro_arts)} pro demo(s).")
 
-    user_steamid = detect_user_steamid(user_arts)
-    if user_steamid is None:
-        print("Could not detect a user steamid that appears in every user demo.")
-        return 2
-    print(f"User steamid detected: {user_steamid}")
+    # Prefer the explicit --steam-id when it actually plays in the demos; otherwise auto-detect.
+    explicit = int(args.steam_id) if args.steam_id and args.steam_id.isdigit() else None
+    if explicit is not None and any(
+        explicit in set(int(x) for x in art.ticks["steamid"].drop_nulls().unique().to_list())
+        for art in user_arts
+    ):
+        user_steamid = explicit
+        print(f"User steamid (explicit): {user_steamid}")
+    else:
+        user_steamid = detect_user_steamid(user_arts)
+        if user_steamid is None:
+            print("Could not detect a user steamid that appears in every user demo.")
+            return 2
+        print(f"User steamid detected: {user_steamid}")
 
     print("Building pro round signatures (one per side per round) …")
     pro_sigs = build_all_signatures(pro_arts, focal_steamid=None, pick_focal_per_round=True)
@@ -87,22 +96,22 @@ def main(argv: list[str] | None = None) -> int:
     # Map each user round to its best pro round.
     pairs = []
     print()
-    print(f"{'demo':32s} {'rd':>3s} {'side':>4s} {'intent':>8s} {'plant':>10s}  →  "
-          f"{'pro_demo':40s} {'rd':>3s} {'final':>6s}  e/a/f/c")
+    print(f"{'demo':32s} {'rd':>3s} {'side':>4s} {'econ':>9s} {'intent':>8s} {'plant':>10s}  →  "
+          f"{'pro_demo':40s} {'rd':>3s} {'p_econ':>9s} {'final':>6s}  e/a/f/c")
     for user_art, user_sig in user_sigs:
         pro_sig, score = best_pro_match(user_sig, pro_sigs)
         if pro_sig is None:
             print(f"{user_art.demo_id[:32]:32s} {user_sig.round_num:>3d} "
-                  f"{user_sig.user_side:>4s} {user_sig.enemy_site_intent:>8s} "
+                  f"{user_sig.user_side:>4s} {user_sig.econ_bucket:>9s} {user_sig.enemy_site_intent:>8s} "
                   f"{user_sig.plant_site:>10s}  →  no candidate")
             continue
         pro_art = next(a for a in pro_arts if a.demo_id == pro_sig.demo_id)
         print(
             f"{user_art.demo_id[:32]:32s} {user_sig.round_num:>3d} "
-            f"{user_sig.user_side:>4s} {user_sig.enemy_site_intent:>8s} "
+            f"{user_sig.user_side:>4s} {user_sig.econ_bucket:>9s} {user_sig.enemy_site_intent:>8s} "
             f"{user_sig.plant_site:>10s}  →  "
             f"{pro_sig.demo_id[:40]:40s} {pro_sig.round_num:>3d} "
-            f"{score['final']:>6.3f}  "
+            f"{pro_sig.econ_bucket:>9s} {score['final']:>6.3f}  "
             f"{score['enemy']:.2f}/{score['ally']:.2f}/{score['focal']:.2f}/{score['coach']:.2f}"
         )
         pairs.append((user_art, user_sig, pro_art, pro_sig, score))

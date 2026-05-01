@@ -172,8 +172,9 @@ def _draw_hud(
     won = "WON" if sig.won else "LOST"
     color_won = (90, 220, 120) if sig.won else (220, 110, 110)
     surface.blit(fonts["body"].render(
-        f"side={sig.user_side.upper()}  enemy_intent={sig.enemy_site_intent.upper()} "
-        f"(conf={sig.enemy_site_conf:.2f})  plant={sig.plant_site}  result={won}",
+        f"side={sig.user_side.upper()}  econ={sig.econ_bucket}(${int(sig.econ_value)})  "
+        f"enemy_intent={sig.enemy_site_intent.upper()}({sig.enemy_site_conf:.2f})  "
+        f"plant={sig.plant_site}  {won}",
         True, color_won), (x + 10, y + 32))
 
     surface.blit(fonts["body"].render(
